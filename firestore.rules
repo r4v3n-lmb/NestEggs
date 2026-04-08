@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function inHousehold(householdId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/households/$(householdId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/households/$(householdId)).data.members;
+    }
+
+    match /households/{householdId} {
+      allow read, write: if inHousehold(householdId);
+      allow create: if isSignedIn() && request.auth.uid == householdId;
+    }
+
+    match /profiles/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /joinCodes/{joinCode} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+  }
+}
