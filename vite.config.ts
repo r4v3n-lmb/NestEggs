@@ -36,6 +36,7 @@ export default defineConfig(({ command }) => {
         },
         workbox: {
           globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
+          globIgnores: ["**/20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png"],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*/i,

@@ -48,6 +48,7 @@ const questTasks: QuestTask[] = [
 
 const QUEST_PROGRESS_KEY = "nesteggs_nav_quest_progress_v1";
 const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
+const APP_LOGO_SRC = "/20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 
 type FoodStoreDraft = {
   id: string;
@@ -71,6 +72,34 @@ type ContributionRecord = {
   createdAt: string;
   amount: number;
   contributionType: "Savings" | "Investment" | "Retirement" | "Emergency";
+};
+
+type ExpenseDraft = {
+  id?: string;
+  category: string;
+  subcategory: string;
+  amount: string;
+  month: string;
+  dueDate: string;
+  isRecurring: boolean;
+  isPaid: boolean;
+};
+
+type IncomeDraft = {
+  id: string;
+  name: string;
+  type: IncomeSource["type"];
+  amount: string;
+};
+
+type BillDraft = {
+  id?: string;
+  title: string;
+  category: string;
+  dueDate: string;
+  amount: string;
+  owner: HouseholdBill["owner"];
+  isPaid: boolean;
 };
 
 const monthKey = currentMonth();
@@ -136,10 +165,36 @@ export default function App() {
   const [foodBudgetModalOpen, setFoodBudgetModalOpen] = useState(false);
   const [foodBudgetDraft, setFoodBudgetDraft] = useState("");
   const [foodStoresDraft, setFoodStoresDraft] = useState<FoodStoreDraft[]>([]);
+  const [expensesModalOpen, setExpensesModalOpen] = useState(false);
+  const [expenseMode, setExpenseMode] = useState<"view" | "edit" | "create">("view");
+  const [selectedExpenseId, setSelectedExpenseId] = useState<string | null>(null);
+  const [expenseDraft, setExpenseDraft] = useState<ExpenseDraft>({
+    category: "",
+    subcategory: "",
+    amount: "",
+    month: currentMonth(),
+    dueDate: "",
+    isRecurring: false,
+    isPaid: false
+  });
+  const [fundsModalOpen, setFundsModalOpen] = useState(false);
+  const [fundsDraft, setFundsDraft] = useState<IncomeDraft[]>([]);
   const [contributionModalOpen, setContributionModalOpen] = useState(false);
   const [contributionAmountDraft, setContributionAmountDraft] = useState("");
   const [contributionTypeDraft, setContributionTypeDraft] =
     useState<ContributionRecord["contributionType"]>("Savings");
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [billsModalOpen, setBillsModalOpen] = useState(false);
+  const [billMode, setBillMode] = useState<"view" | "edit" | "create">("view");
+  const [selectedBillId, setSelectedBillId] = useState<string | null>(null);
+  const [billDraft, setBillDraft] = useState<BillDraft>({
+    title: "",
+    category: "",
+    dueDate: `${currentMonth()}-15`,
+    amount: "",
+    owner: "You",
+    isPaid: false
+  });
   const [questOpen, setQuestOpen] = useState<boolean>(() => {
     const raw = localStorage.getItem(QUEST_OPEN_KEY);
     return raw ? raw === "true" : true;
@@ -310,9 +365,52 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questDone]);
 
-  const handleAddFunds = () => {
-    setIncomes((prev) => prev.map((income, idx) => (idx === 0 ? { ...income, amount: income.amount + 500 } : income)));
-    addHistory("Added R500.00 to Primary Salary.");
+  const openFundsModal = () => {
+    setFundsDraft(
+      incomes.map((income) => ({
+        id: income.id,
+        name: income.name,
+        type: income.type,
+        amount: String(income.amount)
+      }))
+    );
+    setFundsModalOpen(true);
+  };
+
+  const openExpensesModal = () => {
+    setExpenseMode("view");
+    setSelectedExpenseId((prev) => prev ?? expenses[0]?.id ?? null);
+    setExpensesModalOpen(true);
+  };
+
+  const saveFundsModal = () => {
+    const rows = fundsDraft
+      .map((row) => ({
+        id: row.id,
+        name: row.name.trim(),
+        type: row.type,
+        amount: Number(row.amount)
+      }))
+      .filter((row) => row.name.length > 0 && Number.isFinite(row.amount) && row.amount > 0);
+
+    if (rows.length === 0) {
+      addHistory("Funds update failed: add at least one valid income row.");
+      return;
+    }
+
+    const month = currentMonth();
+    const nextIncomes: IncomeSource[] = rows.map((row, idx) => ({
+      id: row.id || `inc-${Date.now()}-${idx}`,
+      partnerId: idx % 2 === 0 ? "p1" : "p2",
+      type: row.type,
+      name: row.name,
+      amount: Math.round(row.amount),
+      month
+    }));
+
+    setIncomes(nextIncomes);
+    setFundsModalOpen(false);
+    addHistory("Updated income streams successfully.");
   };
 
   const openFoodBudgetModal = () => {
@@ -374,6 +472,12 @@ export default function App() {
     setContributionModalOpen(true);
   };
 
+  const openBillsModal = () => {
+    setBillMode("view");
+    setSelectedBillId((prev) => prev ?? bills[0]?.id ?? null);
+    setBillsModalOpen(true);
+  };
+
   const saveContributionModal = () => {
     const amount = Number(contributionAmountDraft);
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -426,9 +530,183 @@ export default function App() {
     addHistory("Marked bill as paid.");
   };
 
+  const startCreateExpense = () => {
+    setExpenseMode("create");
+    setSelectedExpenseId(null);
+    setExpenseDraft({
+      category: "",
+      subcategory: "",
+      amount: "",
+      month: currentMonth(),
+      dueDate: "",
+      isRecurring: false,
+      isPaid: false
+    });
+  };
+
+  const startViewExpense = (expenseId: string) => {
+    setExpenseMode("view");
+    setSelectedExpenseId(expenseId);
+  };
+
+  const startEditExpense = (expense: ExpenseItem) => {
+    setExpenseMode("edit");
+    setSelectedExpenseId(expense.id);
+    setExpenseDraft({
+      id: expense.id,
+      category: expense.category,
+      subcategory: expense.subcategory,
+      amount: String(expense.amount),
+      month: expense.month,
+      dueDate: expense.dueDate ?? "",
+      isRecurring: Boolean(expense.isRecurring),
+      isPaid: Boolean(expense.isPaid)
+    });
+  };
+
+  const saveExpenseDraft = () => {
+    const amount = Number(expenseDraft.amount);
+    if (!expenseDraft.category.trim() || !expenseDraft.subcategory.trim() || !Number.isFinite(amount) || amount <= 0) {
+      addHistory("Expense save failed: complete category, subcategory, and valid amount.");
+      return;
+    }
+
+    const base: ExpenseItem = {
+      id: expenseDraft.id ?? `exp-${Date.now()}`,
+      category: expenseDraft.category.trim(),
+      subcategory: expenseDraft.subcategory.trim(),
+      amount: Math.round(amount),
+      month: expenseDraft.month || currentMonth(),
+      isRecurring: expenseDraft.isRecurring,
+      isPaid: expenseDraft.isPaid
+    };
+
+    const nextExpense = expenseDraft.dueDate.trim() ? { ...base, dueDate: expenseDraft.dueDate.trim() } : base;
+
+    if (expenseMode === "edit" && expenseDraft.id) {
+      setExpenses((prev) => prev.map((expense) => (expense.id === expenseDraft.id ? nextExpense : expense)));
+      addHistory(`Updated expense: ${nextExpense.category} - ${nextExpense.subcategory}.`);
+    } else {
+      setExpenses((prev) => [...prev, nextExpense]);
+      addHistory(`Added expense: ${nextExpense.category} - ${nextExpense.subcategory}.`);
+    }
+
+    setExpenseMode("view");
+    setSelectedExpenseId(nextExpense.id);
+  };
+
+  const deleteExpense = (expenseId: string) => {
+    const target = expenses.find((expense) => expense.id === expenseId);
+    if (!target) return;
+    const ok = window.confirm(`Delete expense ${target.category} - ${target.subcategory}?`);
+    if (!ok) return;
+    const remaining = expenses.filter((expense) => expense.id !== expenseId);
+    setExpenses(remaining);
+    if (selectedExpenseId === expenseId) setSelectedExpenseId(remaining[0]?.id ?? null);
+    addHistory(`Deleted expense: ${target.category} - ${target.subcategory}.`);
+  };
+
+  const startCreateBill = () => {
+    setBillMode("create");
+    setSelectedBillId(null);
+    setBillDraft({
+      title: "",
+      category: "",
+      dueDate: `${currentMonth()}-15`,
+      amount: "",
+      owner: "You",
+      isPaid: false
+    });
+  };
+
+  const startViewBill = (billId: string) => {
+    setBillMode("view");
+    setSelectedBillId(billId);
+  };
+
+  const startEditBill = (bill: HouseholdBill) => {
+    setBillMode("edit");
+    setSelectedBillId(bill.id);
+    setBillDraft({
+      id: bill.id,
+      title: bill.title,
+      category: bill.category,
+      dueDate: bill.dueDate,
+      amount: String(bill.amount),
+      owner: bill.owner,
+      isPaid: bill.isPaid
+    });
+  };
+
+  const saveBillDraft = () => {
+    const amount = Number(billDraft.amount);
+    if (!billDraft.title.trim() || !billDraft.category.trim() || !billDraft.dueDate.trim() || !Number.isFinite(amount) || amount <= 0) {
+      addHistory("Bill save failed: complete title, category, due date, and valid amount.");
+      return;
+    }
+
+    const base: HouseholdBill = {
+      id: billDraft.id ?? `bill-${Date.now()}`,
+      title: billDraft.title.trim(),
+      category: billDraft.category.trim(),
+      dueDate: billDraft.dueDate.trim(),
+      amount: Math.round(amount),
+      owner: billDraft.owner,
+      isPaid: billDraft.isPaid
+    };
+
+    if (billMode === "edit" && billDraft.id) {
+      setBills((prev) => prev.map((bill) => (bill.id === billDraft.id ? base : bill)));
+      addHistory(`Updated bill: ${base.title}.`);
+    } else {
+      setBills((prev) => [...prev, base]);
+      addHistory(`Added bill: ${base.title}.`);
+    }
+
+    setBillMode("view");
+    setSelectedBillId(base.id);
+  };
+
+  const deleteBill = (billId: string) => {
+    const target = bills.find((bill) => bill.id === billId);
+    if (!target) return;
+    const ok = window.confirm(`Delete bill ${target.title}?`);
+    if (!ok) return;
+    const remaining = bills.filter((bill) => bill.id !== billId);
+    setBills(remaining);
+    if (selectedBillId === billId) setSelectedBillId(remaining[0]?.id ?? null);
+    addHistory(`Deleted bill: ${target.title}.`);
+  };
+
+  const handleQuickAddSelection = (selection: "income" | "expense" | "bill" | "savings") => {
+    setQuickAddOpen(false);
+    if (selection === "income") {
+      setActiveTab("dashboard");
+      openFundsModal();
+      addHistory("Quick add: opened Income Manager.");
+      return;
+    }
+    if (selection === "expense") {
+      setActiveTab("expenses");
+      openExpensesModal();
+      startCreateExpense();
+      addHistory("Quick add: opened Expense form.");
+      return;
+    }
+    if (selection === "bill") {
+      setActiveTab("bills");
+      openBillsModal();
+      startCreateBill();
+      addHistory("Quick add: opened Bill form.");
+      return;
+    }
+    setActiveTab("goals");
+    openContributionModal();
+    addHistory("Quick add: opened Savings/Investment contribution.");
+  };
+
   const handleFab = () => {
-    setActiveTab("expenses");
-    addHistory("Quick add opened the Expenses section.");
+    setQuickAddOpen(true);
   };
 
   const routeQuestTask = (taskId: QuestTaskId) => {
@@ -462,6 +740,7 @@ export default function App() {
     return (
       <main className="auth-mask-root">
         <section className="auth-mask-card">
+          <img className="auth-logo" src={APP_LOGO_SRC} alt="NestEggs logo" />
           <p className="eyebrow">NestEggs</p>
           <h1 className="brand-title">Welcome Back</h1>
           <p className="muted">Authenticate before opening your household dashboard.</p>
@@ -532,7 +811,7 @@ export default function App() {
                 <p className="eyebrow">Total Shared Balance</p>
                 <h3>{money(totals.incomeTotal - totals.expenseTotal)}</h3>
               </div>
-              <button className="btn btn-primary" type="button" onClick={handleAddFunds}>Add Funds</button>
+              <button className="btn btn-primary" type="button" onClick={openFundsModal}>Add Funds</button>
             </div>
             <div className="income-track-grid">
               {incomes.map((income, idx) => {
@@ -654,6 +933,11 @@ export default function App() {
       <section className="editorial-head">
         <h2>Expenses</h2>
         <p>Shared spending breakdown for {monthLabel}.</p>
+        <div className="status-strip">
+          <button className="btn btn-secondary" type="button" onClick={openExpensesModal}>
+            Manage Expenses
+          </button>
+        </div>
       </section>
 
       <section className="expenses-layout">
@@ -720,6 +1004,11 @@ export default function App() {
       <section className="editorial-head">
         <h2>Bills & Alerts</h2>
         <p>Individual and shared bills with visibility of who paid.</p>
+        <div className="status-strip">
+          <button className="btn btn-secondary" type="button" onClick={openBillsModal}>
+            Manage Bills
+          </button>
+        </div>
       </section>
 
       <section className="bills-layout">
@@ -885,6 +1174,7 @@ export default function App() {
     <div className="ledger-root">
       <header className="topbar">
         <div className="brand-row">
+          <img className="brand-logo" src={APP_LOGO_SRC} alt="NestEggs logo" />
           <div className="avatar-stack" aria-hidden>
             <span className="avatar-chip">RL</span>
             <span className="avatar-chip partner">BA</span>
@@ -937,6 +1227,370 @@ export default function App() {
 
       <button className="fab" type="button" aria-label="Add transaction" onClick={handleFab}>+</button>
 
+      {quickAddOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Quick Add</h4>
+                <p>Choose what you want to add or manage.</p>
+              </div>
+            </div>
+
+            <div className="quick-add-grid">
+              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("income")}>
+                Income
+              </button>
+              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("expense")}>
+                Expense
+              </button>
+              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("bill")}>
+                Bill
+              </button>
+              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("savings")}>
+                Investment / Savings
+              </button>
+            </div>
+
+            <div className="button-row">
+              <button className="btn btn-ghost" type="button" onClick={() => setQuickAddOpen(false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {billsModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage bills">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Bills Manager</h4>
+                <p>View, edit, delete, and add bills.</p>
+              </div>
+            </div>
+
+            <div className="expense-modal-layout">
+              <div className="store-list">
+                {bills.map((bill) => (
+                  <article key={bill.id} className={`list-card ${selectedBillId === bill.id ? "selected-item" : ""}`}>
+                    <div className="line-item">
+                      <strong>{bill.title}</strong>
+                      <span>{money(bill.amount)}</span>
+                    </div>
+                    <p>{bill.category} · Due {bill.dueDate} · Owner: {bill.owner}</p>
+                    <div className="button-row">
+                      <button className="btn btn-secondary" type="button" onClick={() => startViewBill(bill.id)}>View</button>
+                      <button className="btn btn-primary" type="button" onClick={() => startEditBill(bill)}>Edit</button>
+                      <button className="btn btn-ghost" type="button" onClick={() => deleteBill(bill.id)}>Delete</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="modal-grid">
+                {billMode === "view" ? (
+                  selectedBillId ? (
+                    (() => {
+                      const selected = bills.find((bill) => bill.id === selectedBillId);
+                      if (!selected) return <p className="muted">Select a bill to view details.</p>;
+                      return (
+                        <article className="list-card">
+                          <div className="line-item">
+                            <strong>{selected.title}</strong>
+                            <span>{money(selected.amount)}</span>
+                          </div>
+                          <p>Category: {selected.category}</p>
+                          <p>Due Date: {selected.dueDate}</p>
+                          <p>Owner: {selected.owner}</p>
+                          <p>Paid: {selected.isPaid ? `Yes${selected.paidBy ? ` · by ${selected.paidBy}` : ""}` : "No"}</p>
+                        </article>
+                      );
+                    })()
+                  ) : (
+                    <p className="muted">Pick a bill from the list, or create a new one.</p>
+                  )
+                ) : (
+                  <>
+                    <label>
+                      Bill Title
+                      <input
+                        value={billDraft.title}
+                        onChange={(e) => setBillDraft((prev) => ({ ...prev, title: e.target.value }))}
+                        placeholder="Internet Subscription"
+                      />
+                    </label>
+                    <label>
+                      Category
+                      <input
+                        value={billDraft.category}
+                        onChange={(e) => setBillDraft((prev) => ({ ...prev, category: e.target.value }))}
+                        placeholder="Utilities"
+                      />
+                    </label>
+                    <label>
+                      Amount
+                      <input
+                        type="number"
+                        min={1}
+                        value={billDraft.amount}
+                        onChange={(e) => setBillDraft((prev) => ({ ...prev, amount: e.target.value }))}
+                        placeholder="599"
+                      />
+                    </label>
+                    <label>
+                      Due Date (YYYY-MM-DD)
+                      <input
+                        value={billDraft.dueDate}
+                        onChange={(e) => setBillDraft((prev) => ({ ...prev, dueDate: e.target.value }))}
+                        placeholder={`${currentMonth()}-20`}
+                      />
+                    </label>
+                    <label>
+                      Owner
+                      <select
+                        value={billDraft.owner}
+                        onChange={(e) =>
+                          setBillDraft((prev) => ({ ...prev, owner: e.target.value as HouseholdBill["owner"] }))
+                        }
+                      >
+                        <option value="You">You</option>
+                        <option value="Bronwen Anderson">Bronwen Anderson</option>
+                      </select>
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={billDraft.isPaid}
+                        onChange={(e) => setBillDraft((prev) => ({ ...prev, isPaid: e.target.checked }))}
+                      />
+                      Mark as already paid
+                    </label>
+                    <button className="btn btn-primary" type="button" onClick={saveBillDraft}>
+                      {billMode === "edit" ? "Save Bill" : "Add Bill"}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="button-row">
+              <button className="btn btn-secondary" type="button" onClick={startCreateBill}>Add New Bill</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setBillsModalOpen(false)}>Close</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {expensesModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage expenses">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Expenses Manager</h4>
+                <p>View, edit, delete, and add expenses across all categories.</p>
+              </div>
+            </div>
+
+            <div className="expense-modal-layout">
+              <div className="store-list">
+                {expenses.map((expense) => (
+                  <article key={expense.id} className={`list-card ${selectedExpenseId === expense.id ? "selected-item" : ""}`}>
+                    <div className="line-item">
+                      <strong>{expense.category} - {expense.subcategory}</strong>
+                      <span>{money(expense.amount)}</span>
+                    </div>
+                    <p>{expense.month}{expense.dueDate ? ` · due ${expense.dueDate}` : ""}</p>
+                    <div className="button-row">
+                      <button className="btn btn-secondary" type="button" onClick={() => startViewExpense(expense.id)}>View</button>
+                      <button className="btn btn-primary" type="button" onClick={() => startEditExpense(expense)}>Edit</button>
+                      <button className="btn btn-ghost" type="button" onClick={() => deleteExpense(expense.id)}>Delete</button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <div className="modal-grid">
+                {expenseMode === "view" ? (
+                  selectedExpenseId ? (
+                    (() => {
+                      const selected = expenses.find((expense) => expense.id === selectedExpenseId);
+                      if (!selected) return <p className="muted">Select an expense to view details.</p>;
+                      return (
+                        <article className="list-card">
+                          <div className="line-item">
+                            <strong>{selected.category} - {selected.subcategory}</strong>
+                            <span>{money(selected.amount)}</span>
+                          </div>
+                          <p>Month: {selected.month}</p>
+                          <p>Recurring: {selected.isRecurring ? "Yes" : "No"}</p>
+                          <p>Paid: {selected.isPaid ? "Yes" : "No"}</p>
+                          <p>Due Date: {selected.dueDate ?? "None"}</p>
+                        </article>
+                      );
+                    })()
+                  ) : (
+                    <p className="muted">Pick an expense from the list, or create a new one.</p>
+                  )
+                ) : (
+                  <>
+                    <label>
+                      Category
+                      <input
+                        value={expenseDraft.category}
+                        onChange={(e) => setExpenseDraft((prev) => ({ ...prev, category: e.target.value }))}
+                        placeholder="Housing"
+                      />
+                    </label>
+                    <label>
+                      Subcategory
+                      <input
+                        value={expenseDraft.subcategory}
+                        onChange={(e) => setExpenseDraft((prev) => ({ ...prev, subcategory: e.target.value }))}
+                        placeholder="Rent"
+                      />
+                    </label>
+                    <label>
+                      Amount
+                      <input
+                        type="number"
+                        min={1}
+                        value={expenseDraft.amount}
+                        onChange={(e) => setExpenseDraft((prev) => ({ ...prev, amount: e.target.value }))}
+                        placeholder="18500"
+                      />
+                    </label>
+                    <label>
+                      Month (YYYY-MM)
+                      <input
+                        value={expenseDraft.month}
+                        onChange={(e) => setExpenseDraft((prev) => ({ ...prev, month: e.target.value }))}
+                        placeholder={currentMonth()}
+                      />
+                    </label>
+                    <label>
+                      Due Date (optional, YYYY-MM-DD)
+                      <input
+                        value={expenseDraft.dueDate}
+                        onChange={(e) => setExpenseDraft((prev) => ({ ...prev, dueDate: e.target.value }))}
+                        placeholder={`${currentMonth()}-15`}
+                      />
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={expenseDraft.isRecurring}
+                        onChange={(e) => setExpenseDraft((prev) => ({ ...prev, isRecurring: e.target.checked }))}
+                      />
+                      Recurring Expense
+                    </label>
+                    <label className="inline-check">
+                      <input
+                        type="checkbox"
+                        checked={expenseDraft.isPaid}
+                        onChange={(e) => setExpenseDraft((prev) => ({ ...prev, isPaid: e.target.checked }))}
+                      />
+                      Already Paid
+                    </label>
+                    <button className="btn btn-primary" type="button" onClick={saveExpenseDraft}>
+                      {expenseMode === "edit" ? "Save Expense" : "Add Expense"}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="button-row">
+              <button className="btn btn-secondary" type="button" onClick={startCreateExpense}>Add New Expense</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setExpensesModalOpen(false)}>Close</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {fundsModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage funds">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Manage Funds</h4>
+                <p>Add, edit, and remove income streams.</p>
+              </div>
+            </div>
+
+            <div className="modal-grid">
+              <div className="store-list">
+                {fundsDraft.map((fund) => (
+                  <div key={fund.id} className="store-row funds-row">
+                    <input
+                      value={fund.name}
+                      onChange={(e) =>
+                        setFundsDraft((prev) =>
+                          prev.map((entry) => (entry.id === fund.id ? { ...entry, name: e.target.value } : entry))
+                        )
+                      }
+                      placeholder="Income name"
+                    />
+                    <select
+                      value={fund.type}
+                      onChange={(e) =>
+                        setFundsDraft((prev) =>
+                          prev.map((entry) =>
+                            entry.id === fund.id ? { ...entry, type: e.target.value as IncomeSource["type"] } : entry
+                          )
+                        )
+                      }
+                    >
+                      <option value="salary">Salary</option>
+                      <option value="additional">Additional</option>
+                    </select>
+                    <input
+                      type="number"
+                      min={1}
+                      value={fund.amount}
+                      onChange={(e) =>
+                        setFundsDraft((prev) =>
+                          prev.map((entry) => (entry.id === fund.id ? { ...entry, amount: e.target.value } : entry))
+                        )
+                      }
+                      placeholder="Amount"
+                    />
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      onClick={() => {
+                        const ok = window.confirm(`Remove ${fund.name || "this income stream"}?`);
+                        if (!ok) return;
+                        setFundsDraft((prev) => prev.filter((entry) => entry.id !== fund.id));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() =>
+                  setFundsDraft((prev) => [
+                    ...prev,
+                    { id: `fund-${Date.now()}`, name: "", type: "additional", amount: "" }
+                  ])
+                }
+              >
+                Add Income Stream
+              </button>
+            </div>
+
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={saveFundsModal}>Save Funds</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setFundsModalOpen(false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {foodBudgetModalOpen ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Edit food budget">
           <section className="modal-card">
@@ -985,7 +1639,11 @@ export default function App() {
                     <button
                       className="btn btn-ghost"
                       type="button"
-                      onClick={() => setFoodStoresDraft((prev) => prev.filter((entry) => entry.id !== store.id))}
+                      onClick={() => {
+                        const ok = window.confirm(`Remove ${store.name || "this store"} from food breakdown?`);
+                        if (!ok) return;
+                        setFoodStoresDraft((prev) => prev.filter((entry) => entry.id !== store.id));
+                      }}
                     >
                       Remove
                     </button>
