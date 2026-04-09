@@ -20,6 +20,15 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
+    match /profiles/{userId}/devices/{deviceId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    match /profiles/{userId}/notificationsQueue/{notificationId} {
+      allow read, create: if isSignedIn() && request.auth.uid == userId;
+      allow update, delete: if false;
+    }
+
     match /joinCodes/{joinCode} {
       allow read: if isSignedIn();
       allow write: if isSignedIn();

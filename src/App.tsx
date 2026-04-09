@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BudgetCategoryLimit, ExpenseItem, IncomeSource, SavingsGoal } from "./types";
 import { mockBudgetLimits, mockExpenses, mockGoals, mockIncomes } from "./data/mock";
-import { authApi } from "./firebase";
+import { authApi, notificationsApi } from "./firebase";
 import { currentMonth, money, toPercent } from "./lib/format";
 import { useOfflineQueue } from "./hooks/useOfflineQueue";
 
@@ -51,6 +51,14 @@ const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
 const APP_VERSION = "v0.1.1";
 const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
+const FCM_TOKEN_KEY = "nesteggs_fcm_token_v1";
+const GOAL_TYPE_ORDER: ContributionRecord["contributionType"][] = ["Savings", "Investment", "Retirement", "Emergency"];
+const GOAL_DEFAULTS: Record<ContributionRecord["contributionType"], { title: string; target: number }> = {
+  Savings: { title: "Savings Goal", target: 36000 },
+  Investment: { title: "Investment Goal", target: 120000 },
+  Retirement: { title: "Retirement Goal", target: 500000 },
+  Emergency: { title: "Emergency Goal", target: 50000 }
+};
 
 type FoodStoreDraft = {
   id: string;
@@ -74,6 +82,8 @@ type ContributionRecord = {
   createdAt: string;
   amount: number;
   contributionType: "Savings" | "Investment" | "Retirement" | "Emergency";
+  isRecurring: boolean;
+  recurrence: "Weekly" | "Monthly" | "Quarterly";
 };
 
 type ExpenseDraft = {
@@ -108,6 +118,18 @@ type BillDraft = {
   amount: string;
   owner: HouseholdBill["owner"];
   isPaid: boolean;
+};
+
+type ToastState = {
+  id: number;
+  kind: "success" | "error" | "info";
+  message: string;
+};
+
+type UndoState = {
+  id: number;
+  label: string;
+  onUndo: () => void;
 };
 
 const monthKey = currentMonth();
@@ -165,7 +187,7 @@ export default function App() {
   const [budgetLimits, setBudgetLimits] = useState<BudgetCategoryLimit[]>(mockBudgetLimits);
   const [bills, setBills] = useState<HouseholdBill[]>(initialBills);
 
-  const [alertThreshold, setAlertThreshold] = useState(80);
+  const [alertThreshold, setAlertThreshold] = useState(75);
   const [showGoalHistory, setShowGoalHistory] = useState(false);
   const [actionMessage, setActionMessage] = useState<string>("");
   const [actionHistory, setActionHistory] = useState<string[]>([]);
@@ -191,6 +213,9 @@ export default function App() {
   const [contributionAmountDraft, setContributionAmountDraft] = useState("");
   const [contributionTypeDraft, setContributionTypeDraft] =
     useState<ContributionRecord["contributionType"]>("Savings");
+  const [contributionRecurringDraft, setContributionRecurringDraft] = useState(false);
+  const [contributionFrequencyDraft, setContributionFrequencyDraft] =
+    useState<ContributionRecord["recurrence"]>("Monthly");
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickIncomeModalOpen, setQuickIncomeModalOpen] = useState(false);
   const [quickExpenseModalOpen, setQuickExpenseModalOpen] = useState(false);
@@ -226,6 +251,16 @@ export default function App() {
       return base;
     }
   });
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() =>
+    typeof Notification !== "undefined" ? Notification.permission : "default"
+  );
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return Boolean(localStorage.getItem(FCM_TOKEN_KEY));
+  });
+  const undoTimerRef = useRef<number | null>(null);
 
   const { isOnline, pendingCount } = useOfflineQueue();
 
@@ -252,9 +287,11 @@ export default function App() {
       setAuthStatus("Authentication successful.");
       setIsAuthenticated(true);
       addHistory("Signed in successfully.");
+      showToast("success", "Signed in successfully.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Authentication failed.";
       setAuthStatus(message);
+      showToast("error", message);
     }
   };
 
@@ -262,6 +299,7 @@ export default function App() {
     setAuthStatus("Demo mode enabled.");
     setIsAuthenticated(true);
     addHistory("Entered demo mode without Firebase authentication.");
+    showToast("info", "Demo mode enabled.");
   };
 
   const totals = useMemo(() => {
@@ -384,6 +422,29 @@ export default function App() {
     [goals]
   );
 
+  const goalTypeMetrics = useMemo(() => {
+    const maxContribution = Math.max(
+      1,
+      ...GOAL_TYPE_ORDER.map((type) =>
+        contributionHistory
+          .filter((item) => item.contributionType === type)
+          .reduce((sum, item) => sum + item.amount, 0)
+      )
+    );
+
+    return GOAL_TYPE_ORDER.map((type) => {
+      const items = contributionHistory.filter((item) => item.contributionType === type);
+      const total = items.reduce((sum, item) => sum + item.amount, 0);
+      const recurringCount = items.filter((item) => item.isRecurring).length;
+      const matchedGoal = goals.find((goal) => goal.title.toLowerCase().includes(type.toLowerCase()));
+      const target = matchedGoal?.targetAmount ?? GOAL_DEFAULTS[type].target;
+      const progress = Math.min(100, Math.round((total / Math.max(1, target)) * 100));
+      const share = Math.max(6, Math.round((total / maxContribution) * 100));
+      const gradient = `conic-gradient(#00464a 0deg ${Math.round(progress * 3.6)}deg, #e0e3e3 ${Math.round(progress * 3.6)}deg 360deg)`;
+      return { type, total, recurringCount, target, progress, share, gradient };
+    });
+  }, [contributionHistory, goals]);
+
   const questScore = useMemo(
     () => questTasks.reduce((sum, task) => sum + (questProgress[task.id] ? task.points : 0), 0),
     [questProgress]
@@ -396,6 +457,16 @@ export default function App() {
   const questDone = questCompletedCount === questTasks.length;
   const questPercent = Math.round((questCompletedCount / questTasks.length) * 100);
   const questBadge = questScore >= 90 ? "Household Captain" : questScore >= 40 ? "Planner" : "Navigator";
+  const anyModalOpen =
+    quickAddOpen ||
+    quickIncomeModalOpen ||
+    quickExpenseModalOpen ||
+    quickBillModalOpen ||
+    billsModalOpen ||
+    expensesModalOpen ||
+    fundsModalOpen ||
+    foodBudgetModalOpen ||
+    contributionModalOpen;
 
   useEffect(() => {
     localStorage.setItem(QUEST_PROGRESS_KEY, JSON.stringify(questProgress));
@@ -419,13 +490,61 @@ export default function App() {
   }, [activeTab, isAuthenticated]);
 
   useEffect(() => {
+    if (typeof Notification === "undefined") return;
+    setNotificationPermission(Notification.permission);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !notificationsApi.isConfigured()) return;
+    let unsubscribe: (() => void) | undefined;
+    void notificationsApi.onForegroundMessage((payload) => {
+      const title = payload.notification?.title ?? "New alert";
+      const body = payload.notification?.body ?? "You have a new financial notification.";
+      showToast("info", `${title}: ${body}`);
+      addHistory(`Push received: ${title}`);
+    }).then((cleanup) => {
+      unsubscribe = cleanup;
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     if (questDone) {
       addHistory("Navigation Quest completed. You unlocked Household Captain.");
       setActionMessage("Navigation Quest complete. You are ready to drive the full app.");
       setQuestOpen(false);
+      showToast("success", "Navigation quest completed.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questDone]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast((prev) => (prev?.id === toast.id ? null : prev)), 3200);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    if (anyModalOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = originalOverflow;
+    }
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [anyModalOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    };
+  }, []);
 
   const openFundsModal = () => {
     setFundsDraft(
@@ -437,6 +556,89 @@ export default function App() {
       }))
     );
     setFundsModalOpen(true);
+  };
+
+  const showToast = (kind: ToastState["kind"], message: string) => {
+    setToast({ id: Date.now(), kind, message });
+  };
+
+  const validateMonth = (value: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+  const validateDueDate = (value: string) => /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[0-1])$/.test(value);
+  const normalizeNumber = (value: string) => Number(value.trim());
+
+  const queueUndo = (label: string, onUndo: () => void) => {
+    if (undoTimerRef.current) {
+      window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    const id = Date.now();
+    setUndoState({ id, label, onUndo });
+    undoTimerRef.current = window.setTimeout(() => {
+      setUndoState((prev) => (prev?.id === id ? null : prev));
+      undoTimerRef.current = null;
+    }, 7000);
+  };
+
+  const clearUndo = () => {
+    if (undoTimerRef.current) {
+      window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setUndoState(null);
+  };
+
+  const enableNotifications = async () => {
+    if (!notificationsApi.isConfigured()) {
+      showToast("error", "Notifications are not configured yet (missing VAPID key).");
+      addHistory("Notifications unavailable: configure VITE_FIREBASE_VAPID_KEY.");
+      return;
+    }
+
+    try {
+      if (!("serviceWorker" in navigator)) {
+        throw new Error("Service workers are not available in this browser.");
+      }
+      const swPath = `${import.meta.env.BASE_URL}firebase-messaging-sw.js`;
+      const serviceWorkerRegistration = await navigator.serviceWorker.register(swPath);
+      const { permission, token } = await notificationsApi.requestPermissionAndToken(serviceWorkerRegistration);
+      setNotificationPermission(permission);
+      if (permission !== "granted") {
+        showToast("info", "Notification permission was not granted.");
+        addHistory("Notification permission was not granted.");
+        return;
+      }
+      if (!token) {
+        showToast("error", "Could not retrieve notification token.");
+        addHistory("Notification setup failed: missing FCM token.");
+        return;
+      }
+      localStorage.setItem(FCM_TOKEN_KEY, token);
+      try {
+        await notificationsApi.persistTokenForCurrentUser(token);
+      } catch (persistError) {
+        const persistMessage = persistError instanceof Error ? persistError.message : "Token was not persisted.";
+        showToast("info", persistMessage);
+      }
+      setNotificationsEnabled(true);
+      showToast("success", "Notifications enabled on this device.");
+      addHistory("Notifications enabled successfully.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to enable notifications.";
+      showToast("error", message);
+      addHistory(`Notification setup failed: ${message}`);
+    }
+  };
+
+  const sendTestAlert = async () => {
+    try {
+      await notificationsApi.sendTestNotification();
+      showToast("success", "Sent test notification request.");
+      addHistory("Triggered server test notification.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to send test notification.";
+      showToast("error", message);
+      addHistory(`Test notification failed: ${message}`);
+    }
   };
 
   const openExpensesModal = () => {
@@ -451,12 +653,13 @@ export default function App() {
         id: row.id,
         name: row.name.trim(),
         type: row.type,
-        amount: Number(row.amount)
+        amount: normalizeNumber(row.amount)
       }))
       .filter((row) => row.name.length > 0 && Number.isFinite(row.amount) && row.amount > 0);
 
     if (rows.length === 0) {
       addHistory("Funds update failed: add at least one valid income row.");
+      showToast("error", "Add at least one valid income row.");
       return;
     }
 
@@ -473,6 +676,7 @@ export default function App() {
     setIncomes(nextIncomes);
     setFundsModalOpen(false);
     addHistory("Updated income streams successfully.");
+    showToast("success", "Income streams updated.");
   };
 
   const openFoodBudgetModal = () => {
@@ -490,18 +694,20 @@ export default function App() {
   };
 
   const saveFoodBudgetModal = () => {
-    const newLimit = Number(foodBudgetDraft);
+    const newLimit = normalizeNumber(foodBudgetDraft);
     if (!Number.isFinite(newLimit) || newLimit <= 0) {
       addHistory("Food budget update failed: provide a valid budget amount.");
+      showToast("error", "Enter a valid food budget amount.");
       return;
     }
 
     const stores = foodStoresDraft
-      .map((store) => ({ name: store.name.trim(), amount: Number(store.amount) }))
+      .map((store) => ({ name: store.name.trim(), amount: normalizeNumber(store.amount) }))
       .filter((store) => store.name.length > 0 && Number.isFinite(store.amount) && store.amount > 0);
 
     if (stores.length === 0) {
       addHistory("Food budget update failed: add at least one store with an amount.");
+      showToast("error", "Add at least one grocery store with a valid amount.");
       return;
     }
 
@@ -526,11 +732,14 @@ export default function App() {
     setFoodBudgetModalOpen(false);
     markQuest("adjust_food_budget");
     addHistory(`Updated food budget and ${stores.length} grocery store entries.`);
+    showToast("success", "Food budget updated.");
   };
 
   const openContributionModal = () => {
     setContributionAmountDraft("");
     setContributionTypeDraft("Savings");
+    setContributionRecurringDraft(false);
+    setContributionFrequencyDraft("Monthly");
     setContributionModalOpen(true);
   };
 
@@ -550,9 +759,10 @@ export default function App() {
   };
 
   const saveQuickIncomeModal = () => {
-    const amount = Number(quickIncomeDraft.amount);
+    const amount = normalizeNumber(quickIncomeDraft.amount);
     if (!quickIncomeDraft.name.trim() || !Number.isFinite(amount) || amount <= 0) {
       addHistory("Quick add failed: enter a valid income name and amount.");
+      showToast("error", "Enter a valid income name and amount.");
       return;
     }
 
@@ -568,6 +778,7 @@ export default function App() {
     setIncomes((prev) => [...prev, nextIncome]);
     setQuickIncomeModalOpen(false);
     addHistory(`Quick add: added income ${nextIncome.name}.`);
+    showToast("success", `Added income: ${nextIncome.name}.`);
   };
 
   const openQuickExpenseModal = () => {
@@ -584,9 +795,20 @@ export default function App() {
   };
 
   const saveQuickExpenseModal = () => {
-    const amount = Number(expenseDraft.amount);
+    const amount = normalizeNumber(expenseDraft.amount);
     if (!expenseDraft.category.trim() || !expenseDraft.subcategory.trim() || !Number.isFinite(amount) || amount <= 0) {
       addHistory("Quick add failed: complete expense category, subcategory, and amount.");
+      showToast("error", "Complete category, subcategory, and amount.");
+      return;
+    }
+    if (!validateMonth(expenseDraft.month || currentMonth())) {
+      addHistory("Quick add failed: month must be YYYY-MM.");
+      showToast("error", "Month must use YYYY-MM.");
+      return;
+    }
+    if (expenseDraft.dueDate.trim() && !validateDueDate(expenseDraft.dueDate.trim())) {
+      addHistory("Quick add failed: due date must be YYYY-MM-DD.");
+      showToast("error", "Due date must use YYYY-MM-DD.");
       return;
     }
 
@@ -603,6 +825,7 @@ export default function App() {
     setExpenses((prev) => [...prev, nextExpense]);
     setQuickExpenseModalOpen(false);
     addHistory(`Quick add: added expense ${nextExpense.category} - ${nextExpense.subcategory}.`);
+    showToast("success", "Expense added.");
   };
 
   const openQuickBillModal = () => {
@@ -618,9 +841,15 @@ export default function App() {
   };
 
   const saveQuickBillModal = () => {
-    const amount = Number(billDraft.amount);
+    const amount = normalizeNumber(billDraft.amount);
     if (!billDraft.title.trim() || !billDraft.category.trim() || !billDraft.dueDate.trim() || !Number.isFinite(amount) || amount <= 0) {
       addHistory("Quick add failed: complete bill title, category, due date, and amount.");
+      showToast("error", "Complete title, category, due date, and amount.");
+      return;
+    }
+    if (!validateDueDate(billDraft.dueDate.trim())) {
+      addHistory("Quick add failed: due date must be YYYY-MM-DD.");
+      showToast("error", "Due date must use YYYY-MM-DD.");
       return;
     }
 
@@ -636,25 +865,45 @@ export default function App() {
     setBills((prev) => [...prev, nextBill]);
     setQuickBillModalOpen(false);
     addHistory(`Quick add: added bill ${nextBill.title}.`);
+    showToast("success", "Bill added.");
   };
 
   const saveContributionModal = () => {
-    const amount = Number(contributionAmountDraft);
+    const amount = normalizeNumber(contributionAmountDraft);
     if (!Number.isFinite(amount) || amount <= 0) {
       addHistory("Contribution failed: enter a valid amount.");
+      showToast("error", "Enter a valid contribution amount.");
       return;
     }
 
-    setGoals((prev) =>
-      prev.map((goal, idx) =>
-        idx === 0
-          ? {
-              ...goal,
-              currentAmount: Math.min(goal.currentAmount + Math.round(amount), goal.targetAmount)
-            }
-          : goal
-      )
-    );
+    setGoals((prev) => {
+      const contribution = Math.round(amount);
+      const targetType = contributionTypeDraft;
+      const existingIndex = prev.findIndex((goal) => goal.title.toLowerCase().includes(targetType.toLowerCase()));
+
+      if (existingIndex >= 0) {
+        return prev.map((goal, idx) =>
+          idx === existingIndex
+            ? {
+                ...goal,
+                currentAmount: Math.min(goal.currentAmount + contribution, goal.targetAmount)
+              }
+            : goal
+        );
+      }
+
+      const fallback = GOAL_DEFAULTS[targetType];
+      return [
+        ...prev,
+        {
+          id: `goal-${targetType.toLowerCase()}-${Date.now()}`,
+          title: fallback.title,
+          targetAmount: fallback.target,
+          currentAmount: Math.min(contribution, fallback.target),
+          taxFreeLimit: fallback.target
+        }
+      ];
+    });
 
     setContributionHistory((prev) => [
       {
@@ -665,14 +914,19 @@ export default function App() {
           year: "numeric"
         }).format(new Date()),
         amount: Math.round(amount),
-        contributionType: contributionTypeDraft
+        contributionType: contributionTypeDraft,
+        isRecurring: contributionRecurringDraft,
+        recurrence: contributionFrequencyDraft
       },
       ...prev
     ]);
 
     setContributionModalOpen(false);
     markQuest("add_contribution");
-    addHistory(`Added ${money(amount)} as ${contributionTypeDraft.toLowerCase()} contribution.`);
+    addHistory(
+      `Added ${money(amount)} as ${contributionTypeDraft.toLowerCase()} contribution${contributionRecurringDraft ? ` (${contributionFrequencyDraft.toLowerCase()} recurring)` : ""}.`
+    );
+    showToast("success", "Contribution added.");
   };
 
   const handleViewHistory = () => {
@@ -685,9 +939,17 @@ export default function App() {
   };
 
   const handleMarkBillPaid = (billId: string) => {
+    const original = bills.find((bill) => bill.id === billId);
+    if (!original || original.isPaid) return;
     setBills((prev) => prev.map((bill) => (bill.id === billId ? { ...bill, isPaid: true, paidBy: "You" } : bill)));
     markQuest("mark_bill_paid");
     addHistory("Marked bill as paid.");
+    showToast("success", "Bill marked as paid.");
+    queueUndo("Bill marked paid", () => {
+      setBills((prev) => prev.map((bill) => (bill.id === billId ? original : bill)));
+      showToast("info", "Reverted bill payment.");
+      addHistory(`Undo: restored ${original.title} to unpaid.`);
+    });
   };
 
   const startCreateExpense = () => {
@@ -725,9 +987,20 @@ export default function App() {
   };
 
   const saveExpenseDraft = () => {
-    const amount = Number(expenseDraft.amount);
+    const amount = normalizeNumber(expenseDraft.amount);
     if (!expenseDraft.category.trim() || !expenseDraft.subcategory.trim() || !Number.isFinite(amount) || amount <= 0) {
       addHistory("Expense save failed: complete category, subcategory, and valid amount.");
+      showToast("error", "Complete category, subcategory, and valid amount.");
+      return;
+    }
+    if (!validateMonth(expenseDraft.month || currentMonth())) {
+      addHistory("Expense save failed: month must be YYYY-MM.");
+      showToast("error", "Month must use YYYY-MM.");
+      return;
+    }
+    if (expenseDraft.dueDate.trim() && !validateDueDate(expenseDraft.dueDate.trim())) {
+      addHistory("Expense save failed: due date must be YYYY-MM-DD.");
+      showToast("error", "Due date must use YYYY-MM-DD.");
       return;
     }
 
@@ -746,9 +1019,11 @@ export default function App() {
     if (expenseMode === "edit" && expenseDraft.id) {
       setExpenses((prev) => prev.map((expense) => (expense.id === expenseDraft.id ? nextExpense : expense)));
       addHistory(`Updated expense: ${nextExpense.category} - ${nextExpense.subcategory}.`);
+      showToast("success", "Expense updated.");
     } else {
       setExpenses((prev) => [...prev, nextExpense]);
       addHistory(`Added expense: ${nextExpense.category} - ${nextExpense.subcategory}.`);
+      showToast("success", "Expense added.");
     }
 
     setExpenseMode("view");
@@ -760,10 +1035,18 @@ export default function App() {
     if (!target) return;
     const ok = window.confirm(`Delete expense ${target.category} - ${target.subcategory}?`);
     if (!ok) return;
+    const previousExpenses = [...expenses];
     const remaining = expenses.filter((expense) => expense.id !== expenseId);
     setExpenses(remaining);
     if (selectedExpenseId === expenseId) setSelectedExpenseId(remaining[0]?.id ?? null);
     addHistory(`Deleted expense: ${target.category} - ${target.subcategory}.`);
+    showToast("success", "Expense deleted.");
+    queueUndo("Expense deleted", () => {
+      setExpenses(previousExpenses);
+      setSelectedExpenseId(target.id);
+      showToast("info", "Expense restored.");
+      addHistory(`Undo: restored expense ${target.category} - ${target.subcategory}.`);
+    });
   };
 
   const startCreateBill = () => {
@@ -799,9 +1082,15 @@ export default function App() {
   };
 
   const saveBillDraft = () => {
-    const amount = Number(billDraft.amount);
+    const amount = normalizeNumber(billDraft.amount);
     if (!billDraft.title.trim() || !billDraft.category.trim() || !billDraft.dueDate.trim() || !Number.isFinite(amount) || amount <= 0) {
       addHistory("Bill save failed: complete title, category, due date, and valid amount.");
+      showToast("error", "Complete title, category, due date, and valid amount.");
+      return;
+    }
+    if (!validateDueDate(billDraft.dueDate.trim())) {
+      addHistory("Bill save failed: due date must be YYYY-MM-DD.");
+      showToast("error", "Due date must use YYYY-MM-DD.");
       return;
     }
 
@@ -818,9 +1107,11 @@ export default function App() {
     if (billMode === "edit" && billDraft.id) {
       setBills((prev) => prev.map((bill) => (bill.id === billDraft.id ? base : bill)));
       addHistory(`Updated bill: ${base.title}.`);
+      showToast("success", "Bill updated.");
     } else {
       setBills((prev) => [...prev, base]);
       addHistory(`Added bill: ${base.title}.`);
+      showToast("success", "Bill added.");
     }
 
     setBillMode("view");
@@ -832,10 +1123,18 @@ export default function App() {
     if (!target) return;
     const ok = window.confirm(`Delete bill ${target.title}?`);
     if (!ok) return;
+    const previousBills = [...bills];
     const remaining = bills.filter((bill) => bill.id !== billId);
     setBills(remaining);
     if (selectedBillId === billId) setSelectedBillId(remaining[0]?.id ?? null);
     addHistory(`Deleted bill: ${target.title}.`);
+    showToast("success", "Bill deleted.");
+    queueUndo("Bill deleted", () => {
+      setBills(previousBills);
+      setSelectedBillId(target.id);
+      showToast("info", "Bill restored.");
+      addHistory(`Undo: restored bill ${target.title}.`);
+    });
   };
 
   const handleQuickAddSelection = (selection: "income" | "expense" | "bill" | "savings") => {
@@ -936,10 +1235,26 @@ export default function App() {
     <>
       <section className="editorial-head">
         <h2>Morning, Bronwen Anderson.</h2>
-        <p>Shared household planning for {monthLabel}. Built for connected decisions and clear priorities.</p>
         <div className="status-strip">
           <span className={`status-pill ${isOnline ? "ok" : "warn"}`}>{isOnline ? "Online sync" : "Offline mode"}</span>
           <span className="status-pill neutral">{pendingCount} pending actions</span>
+          {notificationsEnabled ? (
+            <>
+              <span className="status-pill ok">Alerts enabled</span>
+              <button className="btn btn-secondary btn-inline" type="button" onClick={() => void sendTestAlert()}>
+                Send Test Alert
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn btn-secondary btn-inline"
+              type="button"
+              onClick={() => void enableNotifications()}
+              disabled={notificationPermission === "denied"}
+            >
+              {notificationPermission === "denied" ? "Alerts blocked" : "Enable Alerts"}
+            </button>
+          )}
         </div>
       </section>
 
@@ -1264,6 +1579,37 @@ export default function App() {
       </section>
 
       <section className="goal-layout">
+        <article className="panel contribution-lanes-panel">
+          <div className="panel-head compact">
+            <div>
+              <h4>Goal Contribution Lanes</h4>
+              <p>Separate visual tracks for each contribution goal type.</p>
+            </div>
+          </div>
+          <div className="contribution-lanes-grid">
+            {goalTypeMetrics.map((metric) => (
+              <article key={metric.type} className="list-card contribution-lane-card">
+                <div className="lane-head">
+                  <strong>{metric.type}</strong>
+                  <span className="ok-text">{metric.progress}%</span>
+                </div>
+                <div className="lane-body">
+                  <div className="lane-donut" style={{ background: metric.gradient }}>
+                    <div className="lane-donut-core">{metric.progress}%</div>
+                  </div>
+                  <div className="lane-meta">
+                    <p>{money(metric.total)} / {money(metric.target)}</p>
+                    <p>{metric.recurringCount} recurring contributions</p>
+                    <div className="lane-share" aria-hidden>
+                      <span style={{ width: `${metric.share}%` }} />
+                    </div>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </article>
+
         <article className="panel goal-snapshot-panel">
           <div className="panel-head compact">
             <div>
@@ -1316,7 +1662,7 @@ export default function App() {
           <div className="panel-head compact">
             <div>
               <h4>{showGoalHistory ? "Contribution History" : "Recent Contributions"}</h4>
-              <p>{showGoalHistory ? "Logged contribution records" : "Latest income inflows towards goals."}</p>
+              <p>{showGoalHistory ? "Logged contribution records" : "Latest goal contributions across all types."}</p>
             </div>
           </div>
           <div className="stack-list">
@@ -1326,7 +1672,10 @@ export default function App() {
                   <article key={item.id} className="list-card activity-item">
                     <div>
                       <strong>{item.contributionType}</strong>
-                      <p>{item.createdAt}</p>
+                      <p>
+                        {item.createdAt}
+                        {item.isRecurring ? ` · ${item.recurrence} recurring` : ""}
+                      </p>
                     </div>
                     <p className="amount-in">+{money(item.amount)}</p>
                   </article>
@@ -1337,15 +1686,26 @@ export default function App() {
                 </article>
               )
             ) : (
-              incomes.map((income) => (
-                  <article key={income.id} className="list-card activity-item">
-                    <div>
-                      <strong>{income.name}</strong>
-                      <p>{income.type}</p>
-                    </div>
-                    <p className="amount-in">+{money(income.amount)}</p>
-                  </article>
-                ))
+              contributionHistory.length > 0 ? (
+                contributionHistory
+                  .slice(0, 6)
+                  .map((item) => (
+                    <article key={item.id} className="list-card activity-item">
+                      <div>
+                        <strong>{item.contributionType} Goal</strong>
+                        <p>
+                          {item.createdAt} · {item.contributionType}
+                          {item.isRecurring ? ` · ${item.recurrence} recurring` : ""}
+                        </p>
+                      </div>
+                      <p className="amount-in">+{money(item.amount)}</p>
+                    </article>
+                  ))
+              ) : (
+                <article className="list-card neutral-item">
+                  <p>No goal contributions yet. Add one from Quick Add or Add Contribution.</p>
+                </article>
+              )
             )}
           </div>
         </article>
@@ -2144,6 +2504,29 @@ export default function App() {
                   <option value="Emergency">Emergency</option>
                 </select>
               </label>
+
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={contributionRecurringDraft}
+                  onChange={(e) => setContributionRecurringDraft(e.target.checked)}
+                />
+                Recurring Contribution
+              </label>
+
+              {contributionRecurringDraft ? (
+                <label>
+                  Recurrence
+                  <select
+                    value={contributionFrequencyDraft}
+                    onChange={(e) => setContributionFrequencyDraft(e.target.value as ContributionRecord["recurrence"])}
+                  >
+                    <option value="Weekly">Weekly</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Quarterly">Quarterly</option>
+                  </select>
+                </label>
+              ) : null}
             </div>
 
             <div className="button-row">
@@ -2151,6 +2534,34 @@ export default function App() {
               <button className="btn btn-ghost" type="button" onClick={() => setContributionModalOpen(false)}>Cancel</button>
             </div>
           </section>
+        </div>
+      ) : null}
+
+      {undoState ? (
+        <div className="undo-snackbar" role="status" aria-live="polite">
+          <p>{undoState.label}</p>
+          <div className="undo-actions">
+            <button
+              className="btn btn-secondary btn-inline"
+              type="button"
+              onClick={() => {
+                const snapshot = undoState;
+                clearUndo();
+                snapshot.onUndo();
+              }}
+            >
+              Undo
+            </button>
+            <button className="btn btn-ghost btn-inline" type="button" onClick={clearUndo}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {toast ? (
+        <div className={`toast ${toast.kind}`} role="status" aria-live="polite">
+          <p>{toast.message}</p>
         </div>
       ) : null}
     </div>

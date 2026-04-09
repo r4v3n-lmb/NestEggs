@@ -10,8 +10,20 @@ import {
   signInWithPopup,
   type User
 } from "firebase/auth";
-import { getFirestore, doc, getDoc, serverTimestamp, setDoc, updateDoc, arrayUnion } from "firebase/firestore";
+import {
+  arrayUnion,
+  collection,
+  doc,
+  getFirestore,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  addDoc
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
+import { getMessaging, getToken, isSupported, onMessage, type MessagePayload } from "firebase/messaging";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -27,6 +39,8 @@ const app = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
 export const auth = app ? getAuth(app) : null;
 export const db = app ? getFirestore(app) : null;
 export const storage = app ? getStorage(app) : null;
+export const functions = app ? getFunctions(app, "us-central1") : null;
+const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY as string | undefined;
 
 const firebaseMissingConfigMessage =
   "Firebase env vars are missing. Configure VITE_FIREBASE_* values to enable auth and cloud data.";
@@ -39,6 +53,11 @@ const requireAuth = () => {
 const requireDb = () => {
   if (!db) throw new Error(firebaseMissingConfigMessage);
   return db;
+};
+
+const requireFunctions = () => {
+  if (!functions) throw new Error(firebaseMissingConfigMessage);
+  return functions;
 };
 
 const googleProvider = new GoogleAuthProvider();
@@ -94,5 +113,69 @@ export const householdsApi = {
     });
     await setDoc(doc(firestore, "profiles", user.uid), { householdId }, { merge: true });
     return true;
+  }
+};
+
+export const notificationsApi = {
+  isConfigured() {
+    return Boolean(app && vapidKey);
+  },
+  async requestPermissionAndToken(serviceWorkerRegistration?: ServiceWorkerRegistration) {
+    if (!app) throw new Error(firebaseMissingConfigMessage);
+    if (!vapidKey) throw new Error("Missing VITE_FIREBASE_VAPID_KEY for browser notifications.");
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      throw new Error("Notifications are not supported in this browser.");
+    }
+    const supported = await isSupported().catch(() => false);
+    if (!supported) throw new Error("Firebase messaging is not supported in this browser.");
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      return { permission, token: null as string | null };
+    }
+
+    const messaging = getMessaging(app);
+    const token = await getToken(messaging, {
+      vapidKey,
+      serviceWorkerRegistration
+    });
+
+    return { permission, token };
+  },
+  async persistTokenForCurrentUser(token: string) {
+    const user = auth?.currentUser;
+    if (!user) throw new Error("User must be signed in to store a notification token.");
+    const firestore = requireDb();
+    const devicesRef = collection(firestore, "profiles", user.uid, "devices");
+    await addDoc(devicesRef, {
+      token,
+      platform: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      active: true
+    });
+  },
+  async enqueueNotificationForCurrentUser(notification: { title: string; body: string }) {
+    const user = auth?.currentUser;
+    if (!user) throw new Error("User must be signed in to queue notifications.");
+    const firestore = requireDb();
+    const queueRef = collection(firestore, "profiles", user.uid, "notificationsQueue");
+    await addDoc(queueRef, {
+      title: notification.title,
+      body: notification.body,
+      createdAt: serverTimestamp(),
+      status: "pending"
+    });
+  },
+  async sendTestNotification() {
+    const callable = httpsCallable(requireFunctions(), "sendTestNotification");
+    return callable({});
+  },
+  async onForegroundMessage(handler: (payload: MessagePayload) => void) {
+    if (!app) return () => {};
+    const supported = await isSupported().catch(() => false);
+    if (!supported) return () => {};
+    const messaging = getMessaging(app);
+    return onMessage(messaging, handler);
   }
 };
