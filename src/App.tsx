@@ -360,7 +360,7 @@ export default function App() {
     if (questDone) {
       addHistory("Navigation Quest completed. You unlocked Household Captain.");
       setActionMessage("Navigation Quest complete. You are ready to drive the full app.");
-      setQuestOpen(true);
+      setQuestOpen(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questDone]);
@@ -811,7 +811,6 @@ export default function App() {
                 <p className="eyebrow">Total Shared Balance</p>
                 <h3>{money(totals.incomeTotal - totals.expenseTotal)}</h3>
               </div>
-              <button className="btn btn-primary" type="button" onClick={openFundsModal}>Add Funds</button>
             </div>
             <div className="income-track-grid">
               {incomes.map((income, idx) => {
@@ -932,12 +931,7 @@ export default function App() {
     <section className="view-stack">
       <section className="editorial-head">
         <h2>Expenses</h2>
-        <p>Shared spending breakdown for {monthLabel}.</p>
-        <div className="status-strip">
-          <button className="btn btn-secondary" type="button" onClick={openExpensesModal}>
-            Manage Expenses
-          </button>
-        </div>
+        <p>Shared spending breakdown for {monthLabel}. Use + to add or manage entries.</p>
       </section>
 
       <section className="expenses-layout">
@@ -1003,12 +997,7 @@ export default function App() {
     <section className="view-stack">
       <section className="editorial-head">
         <h2>Bills & Alerts</h2>
-        <p>Individual and shared bills with visibility of who paid.</p>
-        <div className="status-strip">
-          <button className="btn btn-secondary" type="button" onClick={openBillsModal}>
-            Manage Bills
-          </button>
-        </div>
+        <p>Individual and shared bills with visibility of who paid. Use + to add or manage bills.</p>
       </section>
 
       <section className="bills-layout">
@@ -1199,12 +1188,12 @@ export default function App() {
       </header>
 
       <main className="ledger-main">
-        {!questOpen ? (
+        {!questDone && !questOpen ? (
           <button className="btn btn-secondary quest-reopen" type="button" onClick={() => setQuestOpen(true)}>
             Open Navigation Quest
           </button>
         ) : null}
-        {questOpen ? renderQuestGuide() : null}
+        {!questDone && questOpen ? renderQuestGuide() : null}
         {actionMessage ? <p className="action-banner">{actionMessage}</p> : null}
         {activeTab === "dashboard" ? renderDashboard() : null}
         {activeTab === "expenses" ? renderExpenses() : null}
@@ -1237,18 +1226,26 @@ export default function App() {
               </div>
             </div>
 
-            <div className="quick-add-grid">
-              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("income")}>
-                Income
+            <div className="quick-add-grid" role="list" aria-label="Quick add actions">
+              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("income")}>
+                <span className="quick-add-kicker">Dashboard</span>
+                <strong>Income</strong>
+                <p>Add, edit, or remove income streams.</p>
               </button>
-              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("expense")}>
-                Expense
+              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("expense")}>
+                <span className="quick-add-kicker">Expenses</span>
+                <strong>Expense</strong>
+                <p>Create or update recurring and variable expenses.</p>
               </button>
-              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("bill")}>
-                Bill
+              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("bill")}>
+                <span className="quick-add-kicker">Bills</span>
+                <strong>Bill</strong>
+                <p>Track due dates, owners, and payment state.</p>
               </button>
-              <button className="btn btn-primary" type="button" onClick={() => handleQuickAddSelection("savings")}>
-                Investment / Savings
+              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("savings")}>
+                <span className="quick-add-kicker">Goals</span>
+                <strong>Investment / Savings</strong>
+                <p>Add a contribution and choose the contribution type.</p>
               </button>
             </div>
 
