@@ -79,7 +79,7 @@ button {
 .topbar {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 40;
   padding: 1rem clamp(1rem, 4vw, 2.2rem);
   background: linear-gradient(to bottom, rgba(247, 250, 249, 0.95), rgba(247, 250, 249, 0.72), transparent);
 }
@@ -199,12 +199,16 @@ button {
 
 .quest-task {
   display: flex;
+  width: 100%;
+  border: none;
+  text-align: left;
   justify-content: space-between;
   gap: 0.6rem;
   align-items: center;
   border-radius: 0.7rem;
   padding: 0.46rem 0.56rem;
   background: var(--surface-low);
+  cursor: pointer;
 }
 
 .quest-task p {
@@ -521,6 +525,15 @@ input:focus {
   background: var(--surface-lowest);
 }
 
+select {
+  border: none;
+  border-radius: 0.85rem;
+  background: var(--surface-high);
+  color: var(--ink);
+  padding: 0.62rem 0.68rem;
+  font-family: "Manrope", sans-serif;
+}
+
 .threshold-input {
   min-width: 6rem;
 }
@@ -772,8 +785,49 @@ input:focus {
   color: var(--ink-muted);
 }
 
+.bill-owner {
+  font-size: 0.73rem;
+  margin-top: 0.15rem;
+}
+
 .goal-layout {
   align-items: start;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(25, 28, 28, 0.28);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: min(760px, 100%);
+  background: var(--surface-lowest);
+  border-radius: 1.2rem;
+  padding: 1rem;
+  box-shadow: 0 14px 32px rgba(25, 28, 28, 0.12);
+}
+
+.modal-grid {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.store-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.store-row {
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: 1.1fr 0.8fr auto;
+  align-items: center;
 }
 
 .bottom-nav {
@@ -888,6 +942,10 @@ input:focus {
   }
 
   .button-row {
+    grid-template-columns: 1fr;
+  }
+
+  .store-row {
     grid-template-columns: 1fr;
   }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BudgetCategoryLimit, ExpenseItem, IncomeSource, SavingsGoal } from "./types";
 import { mockBudgetLimits, mockExpenses, mockGoals, mockIncomes } from "./data/mock";
 import { authApi } from "./firebase";
-import { money, toPercent } from "./lib/format";
+import { currentMonth, money, toPercent } from "./lib/format";
 import { useOfflineQueue } from "./hooks/useOfflineQueue";
 
 type TabId = "dashboard" | "expenses" | "bills" | "goals";
@@ -49,6 +49,72 @@ const questTasks: QuestTask[] = [
 const QUEST_PROGRESS_KEY = "nesteggs_nav_quest_progress_v1";
 const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
 
+type FoodStoreDraft = {
+  id: string;
+  name: string;
+  amount: string;
+};
+
+type HouseholdBill = {
+  id: string;
+  title: string;
+  category: string;
+  dueDate: string;
+  amount: number;
+  owner: "You" | "Bronwen Anderson";
+  isPaid: boolean;
+  paidBy?: string;
+};
+
+type ContributionRecord = {
+  id: string;
+  createdAt: string;
+  amount: number;
+  contributionType: "Savings" | "Investment" | "Retirement" | "Emergency";
+};
+
+const monthKey = currentMonth();
+
+const initialBills: HouseholdBill[] = [
+  {
+    id: "bill-1",
+    title: "Insurance Premium",
+    category: "Insurance",
+    dueDate: `${monthKey}-05`,
+    amount: 1900,
+    owner: "You",
+    isPaid: false
+  },
+  {
+    id: "bill-2",
+    title: "Netflix Subscription",
+    category: "Entertainment",
+    dueDate: `${monthKey}-10`,
+    amount: 199,
+    owner: "Bronwen Anderson",
+    isPaid: true,
+    paidBy: "Bronwen Anderson"
+  },
+  {
+    id: "bill-3",
+    title: "Gym Plan",
+    category: "Health",
+    dueDate: `${monthKey}-14`,
+    amount: 850,
+    owner: "You",
+    isPaid: false
+  },
+  {
+    id: "bill-4",
+    title: "Phone Contract",
+    category: "Utilities",
+    dueDate: `${monthKey}-18`,
+    amount: 560,
+    owner: "Bronwen Anderson",
+    isPaid: false
+  }
+];
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
@@ -60,11 +126,20 @@ export default function App() {
   const [expenses, setExpenses] = useState<ExpenseItem[]>(mockExpenses);
   const [goals, setGoals] = useState<SavingsGoal[]>(mockGoals);
   const [budgetLimits, setBudgetLimits] = useState<BudgetCategoryLimit[]>(mockBudgetLimits);
+  const [bills, setBills] = useState<HouseholdBill[]>(initialBills);
 
   const [alertThreshold, setAlertThreshold] = useState(80);
   const [showGoalHistory, setShowGoalHistory] = useState(false);
   const [actionMessage, setActionMessage] = useState<string>("");
   const [actionHistory, setActionHistory] = useState<string[]>([]);
+  const [contributionHistory, setContributionHistory] = useState<ContributionRecord[]>([]);
+  const [foodBudgetModalOpen, setFoodBudgetModalOpen] = useState(false);
+  const [foodBudgetDraft, setFoodBudgetDraft] = useState("");
+  const [foodStoresDraft, setFoodStoresDraft] = useState<FoodStoreDraft[]>([]);
+  const [contributionModalOpen, setContributionModalOpen] = useState(false);
+  const [contributionAmountDraft, setContributionAmountDraft] = useState("");
+  const [contributionTypeDraft, setContributionTypeDraft] =
+    useState<ContributionRecord["contributionType"]>("Savings");
   const [questOpen, setQuestOpen] = useState<boolean>(() => {
     const raw = localStorage.getItem(QUEST_OPEN_KEY);
     return raw ? raw === "true" : true;
@@ -160,28 +235,23 @@ export default function App() {
       .sort((a, b) => b.amount - a.amount);
   }, [expenses, totals.expenseTotal]);
 
-  const recurringBills = useMemo(
-    () => expenses.filter((expense) => expense.isRecurring).sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "")),
-    [expenses]
-  );
-
   const notifications = useMemo(() => {
     const now = new Date();
     const byBudget = categorySpend
       .filter((row) => row.ratio * 100 >= alertThreshold)
       .map((row) => `${row.category} is at ${Math.round(row.ratio * 100)}% of budget.`);
 
-    const overdueBills = expenses
-      .filter((expense) => expense.isRecurring && !expense.isPaid && expense.dueDate)
-      .filter((expense) => {
-        const dueDate = new Date(expense.dueDate as string);
+    const overdueBills = bills
+      .filter((bill) => !bill.isPaid)
+      .filter((bill) => {
+        const dueDate = new Date(bill.dueDate);
         const diff = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-        return diff >= 2;
+        return diff >= 0;
       })
-      .map((expense) => `${expense.subcategory} is overdue by 2+ days.`);
+      .map((bill) => `${bill.title} (${bill.owner}) is overdue.`);
 
     return [...byBudget, ...overdueBills];
-  }, [alertThreshold, categorySpend, expenses]);
+  }, [alertThreshold, bills, categorySpend]);
 
   const monthLabel = new Intl.DateTimeFormat("en-ZA", { month: "long", year: "numeric" }).format(new Date());
   const primaryGoal = goals[0];
@@ -245,25 +315,100 @@ export default function App() {
     addHistory("Added R500.00 to Primary Salary.");
   };
 
-  const handleAdjustFoodBudget = () => {
-    setBudgetLimits((prev) => prev.map((limit) => (limit.category === "Groceries" ? { ...limit, limit: limit.limit + 250 } : limit)));
-    markQuest("adjust_food_budget");
-    addHistory("Raised Groceries budget by R250.00.");
+  const openFoodBudgetModal = () => {
+    const groceriesLimit = budgetLimits.find((limit) => limit.category === "Groceries")?.limit ?? 0;
+    const groceries = expenses.filter((expense) => expense.category === "Groceries");
+    setFoodBudgetDraft(String(groceriesLimit));
+    setFoodStoresDraft(
+      groceries.map((store) => ({
+        id: store.id,
+        name: store.subcategory,
+        amount: String(store.amount)
+      }))
+    );
+    setFoodBudgetModalOpen(true);
   };
 
-  const handleAddContribution = () => {
+  const saveFoodBudgetModal = () => {
+    const newLimit = Number(foodBudgetDraft);
+    if (!Number.isFinite(newLimit) || newLimit <= 0) {
+      addHistory("Food budget update failed: provide a valid budget amount.");
+      return;
+    }
+
+    const stores = foodStoresDraft
+      .map((store) => ({ name: store.name.trim(), amount: Number(store.amount) }))
+      .filter((store) => store.name.length > 0 && Number.isFinite(store.amount) && store.amount > 0);
+
+    if (stores.length === 0) {
+      addHistory("Food budget update failed: add at least one store with an amount.");
+      return;
+    }
+
+    setBudgetLimits((prev) =>
+      prev.map((limit) => (limit.category === "Groceries" ? { ...limit, limit: Math.round(newLimit) } : limit))
+    );
+
+    setExpenses((prev) => {
+      const month = prev[0]?.month ?? currentMonth();
+      const nonGroceries = prev.filter((expense) => expense.category !== "Groceries");
+      const updatedGroceries: ExpenseItem[] = stores.map((store, idx) => ({
+        id: `grocery-${Date.now()}-${idx}`,
+        category: "Groceries",
+        subcategory: store.name,
+        amount: Math.round(store.amount),
+        month,
+        isPaid: false
+      }));
+      return [...nonGroceries, ...updatedGroceries];
+    });
+
+    setFoodBudgetModalOpen(false);
+    markQuest("adjust_food_budget");
+    addHistory(`Updated food budget and ${stores.length} grocery store entries.`);
+  };
+
+  const openContributionModal = () => {
+    setContributionAmountDraft("");
+    setContributionTypeDraft("Savings");
+    setContributionModalOpen(true);
+  };
+
+  const saveContributionModal = () => {
+    const amount = Number(contributionAmountDraft);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      addHistory("Contribution failed: enter a valid amount.");
+      return;
+    }
+
     setGoals((prev) =>
       prev.map((goal, idx) =>
         idx === 0
           ? {
               ...goal,
-              currentAmount: Math.min(goal.currentAmount + 500, goal.targetAmount)
+              currentAmount: Math.min(goal.currentAmount + Math.round(amount), goal.targetAmount)
             }
           : goal
       )
     );
+
+    setContributionHistory((prev) => [
+      {
+        id: `contrib-${Date.now()}`,
+        createdAt: new Intl.DateTimeFormat("en-ZA", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric"
+        }).format(new Date()),
+        amount: Math.round(amount),
+        contributionType: contributionTypeDraft
+      },
+      ...prev
+    ]);
+
+    setContributionModalOpen(false);
     markQuest("add_contribution");
-    addHistory("Added R500.00 contribution to primary goal.");
+    addHistory(`Added ${money(amount)} as ${contributionTypeDraft.toLowerCase()} contribution.`);
   };
 
   const handleViewHistory = () => {
@@ -276,14 +421,41 @@ export default function App() {
   };
 
   const handleMarkBillPaid = (billId: string) => {
-    setExpenses((prev) => prev.map((bill) => (bill.id === billId ? { ...bill, isPaid: true } : bill)));
+    setBills((prev) => prev.map((bill) => (bill.id === billId ? { ...bill, isPaid: true, paidBy: "You" } : bill)));
     markQuest("mark_bill_paid");
-    addHistory("Marked recurring bill as paid.");
+    addHistory("Marked bill as paid.");
   };
 
   const handleFab = () => {
     setActiveTab("expenses");
     addHistory("Quick add opened the Expenses section.");
+  };
+
+  const routeQuestTask = (taskId: QuestTaskId) => {
+    if (taskId === "visit_dashboard") setActiveTab("dashboard");
+    if (taskId === "visit_expenses") setActiveTab("expenses");
+    if (taskId === "visit_bills") setActiveTab("bills");
+    if (taskId === "visit_goals") setActiveTab("goals");
+
+    if (taskId === "adjust_food_budget") {
+      setActiveTab("expenses");
+      openFoodBudgetModal();
+    }
+
+    if (taskId === "mark_bill_paid") {
+      setActiveTab("bills");
+    }
+
+    if (taskId === "add_contribution") {
+      setActiveTab("goals");
+      openContributionModal();
+    }
+
+    if (taskId === "open_history") {
+      setActiveTab("goals");
+      setShowGoalHistory(true);
+      markQuest("open_history");
+    }
   };
 
   if (!isAuthenticated) {
@@ -519,7 +691,7 @@ export default function App() {
                 <strong>{money(expense.amount)}</strong>
               </div>
             ))}
-          <button className="btn btn-primary" type="button" onClick={handleAdjustFoodBudget}>Adjust Food Budget</button>
+          <button className="btn btn-primary" type="button" onClick={openFoodBudgetModal}>Adjust Food Budget</button>
         </article>
       </section>
 
@@ -547,7 +719,7 @@ export default function App() {
     <section className="view-stack">
       <section className="editorial-head">
         <h2>Bills & Alerts</h2>
-        <p>Recurring commitments and priority attention items.</p>
+        <p>Individual and shared bills with visibility of who paid.</p>
       </section>
 
       <section className="bills-layout">
@@ -572,20 +744,21 @@ export default function App() {
           <div className="panel-head compact">
             <div>
               <h4>Upcoming Schedule</h4>
-              <p>Recurring bills and payment status.</p>
+              <p>Household bill ownership and payment status.</p>
             </div>
           </div>
           <div className="stack-list">
-            {recurringBills.map((bill) => (
+            {bills.map((bill) => (
               <article key={bill.id} className={`list-card bill-item ${bill.isPaid ? "paid" : "upcoming"}`}>
                 <div>
-                  <strong>{bill.subcategory}</strong>
-                  <p>{bill.category} · {bill.dueDate ?? "No due date"}</p>
+                  <strong>{bill.title}</strong>
+                  <p>{bill.category} · Due {bill.dueDate}</p>
+                  <p className="bill-owner">Owner: {bill.owner}</p>
                 </div>
                 <div className="bill-right">
                   <p>{money(bill.amount)}</p>
                   {bill.isPaid ? (
-                    <span>Paid</span>
+                    <span>Paid by {bill.paidBy ?? bill.owner}</span>
                   ) : (
                     <button className="btn btn-secondary btn-inline" type="button" onClick={() => handleMarkBillPaid(bill.id)}>
                       Mark Paid
@@ -625,7 +798,7 @@ export default function App() {
               <p className="goal-foot">{progress}% complete</p>
               {idx === 0 ? (
                 <div className="button-row">
-                  <button className="btn btn-primary" type="button" onClick={handleAddContribution}>Add Contribution</button>
+                  <button className="btn btn-primary" type="button" onClick={openContributionModal}>Add Contribution</button>
                   <button className="btn btn-secondary" type="button" onClick={handleViewHistory}>View History</button>
                 </div>
               ) : null}
@@ -637,17 +810,28 @@ export default function App() {
           <div className="panel-head compact">
             <div>
               <h4>{showGoalHistory ? "Contribution History" : "Recent Contributions"}</h4>
-              <p>{showGoalHistory ? "Your latest in-app actions" : "Latest income inflows towards goals."}</p>
+              <p>{showGoalHistory ? "Logged contribution records" : "Latest income inflows towards goals."}</p>
             </div>
           </div>
           <div className="stack-list">
-            {showGoalHistory
-              ? actionHistory.map((item) => (
-                  <article key={item} className="list-card">
-                    <p>{item}</p>
+            {showGoalHistory ? (
+              contributionHistory.length > 0 ? (
+                contributionHistory.map((item) => (
+                  <article key={item.id} className="list-card activity-item">
+                    <div>
+                      <strong>{item.contributionType}</strong>
+                      <p>{item.createdAt}</p>
+                    </div>
+                    <p className="amount-in">+{money(item.amount)}</p>
                   </article>
                 ))
-              : incomes.map((income) => (
+              ) : (
+                <article className="list-card neutral-item">
+                  <p>No contribution history yet. Add a contribution to start.</p>
+                </article>
+              )
+            ) : (
+              incomes.map((income) => (
                   <article key={income.id} className="list-card activity-item">
                     <div>
                       <strong>{income.name}</strong>
@@ -655,7 +839,8 @@ export default function App() {
                     </div>
                     <p className="amount-in">+{money(income.amount)}</p>
                   </article>
-                ))}
+                ))
+            )}
           </div>
         </article>
       </section>
@@ -682,10 +867,15 @@ export default function App() {
       <p className="muted">{questCompletedCount} of {questTasks.length} tasks completed.</p>
       <div className="quest-list">
         {questTasks.map((task) => (
-          <article key={task.id} className={`quest-task ${questProgress[task.id] ? "done" : ""}`}>
+          <button
+            key={task.id}
+            type="button"
+            className={`quest-task ${questProgress[task.id] ? "done" : ""}`}
+            onClick={() => routeQuestTask(task.id)}
+          >
             <p>{task.label}</p>
             <strong>+{task.points}</strong>
-          </article>
+          </button>
         ))}
       </div>
     </aside>
@@ -746,6 +936,128 @@ export default function App() {
       </nav>
 
       <button className="fab" type="button" aria-label="Add transaction" onClick={handleFab}>+</button>
+
+      {foodBudgetModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Edit food budget">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Edit Food Budget</h4>
+                <p>Update monthly groceries budget and store breakdown.</p>
+              </div>
+            </div>
+
+            <div className="modal-grid">
+              <label>
+                Monthly Food Budget
+                <input
+                  type="number"
+                  min={1}
+                  value={foodBudgetDraft}
+                  onChange={(e) => setFoodBudgetDraft(e.target.value)}
+                  placeholder="6500"
+                />
+              </label>
+
+              <div className="store-list">
+                {foodStoresDraft.map((store) => (
+                  <div key={store.id} className="store-row">
+                    <input
+                      value={store.name}
+                      onChange={(e) =>
+                        setFoodStoresDraft((prev) =>
+                          prev.map((entry) => (entry.id === store.id ? { ...entry, name: e.target.value } : entry))
+                        )
+                      }
+                      placeholder="Store name"
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      value={store.amount}
+                      onChange={(e) =>
+                        setFoodStoresDraft((prev) =>
+                          prev.map((entry) => (entry.id === store.id ? { ...entry, amount: e.target.value } : entry))
+                        )
+                      }
+                      placeholder="Amount"
+                    />
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      onClick={() => setFoodStoresDraft((prev) => prev.filter((entry) => entry.id !== store.id))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() =>
+                  setFoodStoresDraft((prev) => [
+                    ...prev,
+                    { id: `store-${Date.now()}`, name: "", amount: "" }
+                  ])
+                }
+              >
+                Add Store
+              </button>
+            </div>
+
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={saveFoodBudgetModal}>Save Changes</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setFoodBudgetModalOpen(false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {contributionModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Add contribution">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Add Contribution</h4>
+                <p>Capture amount and contribution type.</p>
+              </div>
+            </div>
+
+            <div className="modal-grid">
+              <label>
+                Amount
+                <input
+                  type="number"
+                  min={1}
+                  value={contributionAmountDraft}
+                  onChange={(e) => setContributionAmountDraft(e.target.value)}
+                  placeholder="500"
+                />
+              </label>
+
+              <label>
+                Contribution Type
+                <select
+                  value={contributionTypeDraft}
+                  onChange={(e) => setContributionTypeDraft(e.target.value as ContributionRecord["contributionType"])}
+                >
+                  <option value="Savings">Savings</option>
+                  <option value="Investment">Investment</option>
+                  <option value="Retirement">Retirement</option>
+                  <option value="Emergency">Emergency</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={saveContributionModal}>Add</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setContributionModalOpen(false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }
