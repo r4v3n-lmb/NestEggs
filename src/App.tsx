@@ -94,6 +94,12 @@ type IncomeDraft = {
   amount: string;
 };
 
+type QuickIncomeDraft = {
+  name: string;
+  type: IncomeSource["type"];
+  amount: string;
+};
+
 type BillDraft = {
   id?: string;
   title: string;
@@ -186,6 +192,14 @@ export default function App() {
   const [contributionTypeDraft, setContributionTypeDraft] =
     useState<ContributionRecord["contributionType"]>("Savings");
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickIncomeModalOpen, setQuickIncomeModalOpen] = useState(false);
+  const [quickExpenseModalOpen, setQuickExpenseModalOpen] = useState(false);
+  const [quickBillModalOpen, setQuickBillModalOpen] = useState(false);
+  const [quickIncomeDraft, setQuickIncomeDraft] = useState<QuickIncomeDraft>({
+    name: "",
+    type: "additional",
+    amount: ""
+  });
   const [billsModalOpen, setBillsModalOpen] = useState(false);
   const [billMode, setBillMode] = useState<"view" | "edit" | "create">("view");
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null);
@@ -526,6 +540,104 @@ export default function App() {
     setBillsModalOpen(true);
   };
 
+  const openQuickIncomeModal = () => {
+    setQuickIncomeDraft({
+      name: "",
+      type: "additional",
+      amount: ""
+    });
+    setQuickIncomeModalOpen(true);
+  };
+
+  const saveQuickIncomeModal = () => {
+    const amount = Number(quickIncomeDraft.amount);
+    if (!quickIncomeDraft.name.trim() || !Number.isFinite(amount) || amount <= 0) {
+      addHistory("Quick add failed: enter a valid income name and amount.");
+      return;
+    }
+
+    const nextIncome: IncomeSource = {
+      id: `inc-${Date.now()}`,
+      partnerId: incomes.length % 2 === 0 ? "p1" : "p2",
+      type: quickIncomeDraft.type,
+      name: quickIncomeDraft.name.trim(),
+      amount: Math.round(amount),
+      month: currentMonth()
+    };
+
+    setIncomes((prev) => [...prev, nextIncome]);
+    setQuickIncomeModalOpen(false);
+    addHistory(`Quick add: added income ${nextIncome.name}.`);
+  };
+
+  const openQuickExpenseModal = () => {
+    setExpenseDraft({
+      category: "",
+      subcategory: "",
+      amount: "",
+      month: currentMonth(),
+      dueDate: "",
+      isRecurring: false,
+      isPaid: false
+    });
+    setQuickExpenseModalOpen(true);
+  };
+
+  const saveQuickExpenseModal = () => {
+    const amount = Number(expenseDraft.amount);
+    if (!expenseDraft.category.trim() || !expenseDraft.subcategory.trim() || !Number.isFinite(amount) || amount <= 0) {
+      addHistory("Quick add failed: complete expense category, subcategory, and amount.");
+      return;
+    }
+
+    const base: ExpenseItem = {
+      id: `exp-${Date.now()}`,
+      category: expenseDraft.category.trim(),
+      subcategory: expenseDraft.subcategory.trim(),
+      amount: Math.round(amount),
+      month: expenseDraft.month || currentMonth(),
+      isRecurring: expenseDraft.isRecurring,
+      isPaid: expenseDraft.isPaid
+    };
+    const nextExpense = expenseDraft.dueDate.trim() ? { ...base, dueDate: expenseDraft.dueDate.trim() } : base;
+    setExpenses((prev) => [...prev, nextExpense]);
+    setQuickExpenseModalOpen(false);
+    addHistory(`Quick add: added expense ${nextExpense.category} - ${nextExpense.subcategory}.`);
+  };
+
+  const openQuickBillModal = () => {
+    setBillDraft({
+      title: "",
+      category: "",
+      dueDate: `${currentMonth()}-15`,
+      amount: "",
+      owner: "You",
+      isPaid: false
+    });
+    setQuickBillModalOpen(true);
+  };
+
+  const saveQuickBillModal = () => {
+    const amount = Number(billDraft.amount);
+    if (!billDraft.title.trim() || !billDraft.category.trim() || !billDraft.dueDate.trim() || !Number.isFinite(amount) || amount <= 0) {
+      addHistory("Quick add failed: complete bill title, category, due date, and amount.");
+      return;
+    }
+
+    const nextBill: HouseholdBill = {
+      id: `bill-${Date.now()}`,
+      title: billDraft.title.trim(),
+      category: billDraft.category.trim(),
+      dueDate: billDraft.dueDate.trim(),
+      amount: Math.round(amount),
+      owner: billDraft.owner,
+      isPaid: billDraft.isPaid
+    };
+    setBills((prev) => [...prev, nextBill]);
+    setQuickBillModalOpen(false);
+    addHistory(`Quick add: added bill ${nextBill.title}.`);
+  };
+
   const saveContributionModal = () => {
     const amount = Number(contributionAmountDraft);
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -730,21 +842,19 @@ export default function App() {
     setQuickAddOpen(false);
     if (selection === "income") {
       setActiveTab("dashboard");
-      openFundsModal();
-      addHistory("Quick add: opened Income Manager.");
+      openQuickIncomeModal();
+      addHistory("Quick add: opened Income form.");
       return;
     }
     if (selection === "expense") {
       setActiveTab("expenses");
-      openExpensesModal();
-      startCreateExpense();
+      openQuickExpenseModal();
       addHistory("Quick add: opened Expense form.");
       return;
     }
     if (selection === "bill") {
       setActiveTab("bills");
-      openBillsModal();
-      startCreateBill();
+      openQuickBillModal();
       addHistory("Quick add: opened Bill form.");
       return;
     }
@@ -860,6 +970,9 @@ export default function App() {
                 <p className="eyebrow">Total Shared Balance</p>
                 <h3>{money(totals.incomeTotal - totals.expenseTotal)}</h3>
               </div>
+              <button className="btn btn-secondary" type="button" onClick={openFundsModal}>
+                Manage Income
+              </button>
             </div>
             <div className="income-track-grid">
               {incomes.map((income, idx) => {
@@ -1001,6 +1114,11 @@ export default function App() {
       <section className="editorial-head">
         <h2>Expenses</h2>
         <p>Shared spending breakdown for {monthLabel}. Use + to add or manage entries.</p>
+        <div className="status-strip">
+          <button className="btn btn-secondary" type="button" onClick={openExpensesModal}>
+            Manage Existing
+          </button>
+        </div>
       </section>
 
       <section className="expenses-layout">
@@ -1067,6 +1185,11 @@ export default function App() {
       <section className="editorial-head">
         <h2>Bills & Alerts</h2>
         <p>Individual and shared bills with visibility of who paid. Use + to add or manage bills.</p>
+        <div className="status-strip">
+          <button className="btn btn-secondary" type="button" onClick={openBillsModal}>
+            Manage Existing
+          </button>
+        </div>
       </section>
 
       <section className="bills-layout">
@@ -1373,6 +1496,201 @@ export default function App() {
                   <span className="quick-add-meta">Growth target</span>
                 </div>
               </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {quickIncomeModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add income">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Quick Add Income</h4>
+                <p>Add a new income source only. Manage existing items from Dashboard.</p>
+              </div>
+            </div>
+            <div className="modal-grid">
+              <label>
+                Income Name
+                <input
+                  value={quickIncomeDraft.name}
+                  onChange={(e) => setQuickIncomeDraft((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="Salary"
+                />
+              </label>
+              <label>
+                Income Type
+                <select
+                  value={quickIncomeDraft.type}
+                  onChange={(e) => setQuickIncomeDraft((prev) => ({ ...prev, type: e.target.value as IncomeSource["type"] }))}
+                >
+                  <option value="salary">Salary</option>
+                  <option value="additional">Additional</option>
+                </select>
+              </label>
+              <label>
+                Amount
+                <input
+                  type="number"
+                  min={1}
+                  value={quickIncomeDraft.amount}
+                  onChange={(e) => setQuickIncomeDraft((prev) => ({ ...prev, amount: e.target.value }))}
+                  placeholder="25000"
+                />
+              </label>
+            </div>
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={saveQuickIncomeModal}>Add Income</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setQuickIncomeModalOpen(false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {quickExpenseModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add expense">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Quick Add Expense</h4>
+                <p>Add a new expense only. Manage existing items from Expenses.</p>
+              </div>
+            </div>
+            <div className="modal-grid">
+              <label>
+                Category
+                <input
+                  value={expenseDraft.category}
+                  onChange={(e) => setExpenseDraft((prev) => ({ ...prev, category: e.target.value }))}
+                  placeholder="Housing"
+                />
+              </label>
+              <label>
+                Subcategory
+                <input
+                  value={expenseDraft.subcategory}
+                  onChange={(e) => setExpenseDraft((prev) => ({ ...prev, subcategory: e.target.value }))}
+                  placeholder="Rent"
+                />
+              </label>
+              <label>
+                Amount
+                <input
+                  type="number"
+                  min={1}
+                  value={expenseDraft.amount}
+                  onChange={(e) => setExpenseDraft((prev) => ({ ...prev, amount: e.target.value }))}
+                  placeholder="12000"
+                />
+              </label>
+              <label>
+                Month (YYYY-MM)
+                <input
+                  value={expenseDraft.month}
+                  onChange={(e) => setExpenseDraft((prev) => ({ ...prev, month: e.target.value }))}
+                  placeholder={currentMonth()}
+                />
+              </label>
+              <label>
+                Due Date (optional)
+                <input
+                  value={expenseDraft.dueDate}
+                  onChange={(e) => setExpenseDraft((prev) => ({ ...prev, dueDate: e.target.value }))}
+                  placeholder={`${currentMonth()}-15`}
+                />
+              </label>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={expenseDraft.isRecurring}
+                  onChange={(e) => setExpenseDraft((prev) => ({ ...prev, isRecurring: e.target.checked }))}
+                />
+                Recurring Expense
+              </label>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={expenseDraft.isPaid}
+                  onChange={(e) => setExpenseDraft((prev) => ({ ...prev, isPaid: e.target.checked }))}
+                />
+                Already Paid
+              </label>
+            </div>
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={saveQuickExpenseModal}>Add Expense</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setQuickExpenseModalOpen(false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {quickBillModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add bill">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Quick Add Bill</h4>
+                <p>Add a new bill only. Manage existing items from Bills.</p>
+              </div>
+            </div>
+            <div className="modal-grid">
+              <label>
+                Bill Title
+                <input
+                  value={billDraft.title}
+                  onChange={(e) => setBillDraft((prev) => ({ ...prev, title: e.target.value }))}
+                  placeholder="Internet"
+                />
+              </label>
+              <label>
+                Category
+                <input
+                  value={billDraft.category}
+                  onChange={(e) => setBillDraft((prev) => ({ ...prev, category: e.target.value }))}
+                  placeholder="Utilities"
+                />
+              </label>
+              <label>
+                Amount
+                <input
+                  type="number"
+                  min={1}
+                  value={billDraft.amount}
+                  onChange={(e) => setBillDraft((prev) => ({ ...prev, amount: e.target.value }))}
+                  placeholder="899"
+                />
+              </label>
+              <label>
+                Due Date
+                <input
+                  value={billDraft.dueDate}
+                  onChange={(e) => setBillDraft((prev) => ({ ...prev, dueDate: e.target.value }))}
+                  placeholder={`${currentMonth()}-20`}
+                />
+              </label>
+              <label>
+                Owner
+                <select
+                  value={billDraft.owner}
+                  onChange={(e) => setBillDraft((prev) => ({ ...prev, owner: e.target.value as HouseholdBill["owner"] }))}
+                >
+                  <option value="You">You</option>
+                  <option value="Bronwen Anderson">Bronwen Anderson</option>
+                </select>
+              </label>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={billDraft.isPaid}
+                  onChange={(e) => setBillDraft((prev) => ({ ...prev, isPaid: e.target.checked }))}
+                />
+                Mark as already paid
+              </label>
+            </div>
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={saveQuickBillModal}>Add Bill</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setQuickBillModalOpen(false)}>Cancel</button>
             </div>
           </section>
         </div>
