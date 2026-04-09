@@ -48,7 +48,8 @@ const questTasks: QuestTask[] = [
 
 const QUEST_PROGRESS_KEY = "nesteggs_nav_quest_progress_v1";
 const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
-const APP_LOGO_SRC = "/20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
+const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
+const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
 
 type FoodStoreDraft = {
   id: string;
@@ -354,6 +355,11 @@ export default function App() {
     if (activeTab === "expenses") markQuest("visit_expenses");
     if (activeTab === "bills") markQuest("visit_bills");
     if (activeTab === "goals") markQuest("visit_goals");
+  }, [activeTab, isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [activeTab, isAuthenticated]);
 
   useEffect(() => {
@@ -1217,40 +1223,56 @@ export default function App() {
       <button className="fab" type="button" aria-label="Add transaction" onClick={handleFab}>+</button>
 
       {quickAddOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add">
-          <section className="modal-card">
-            <div className="panel-head compact">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Quick add">
+          <section className="modal-card quick-sheet">
+            <div className="sheet-handle" aria-hidden />
+            <div className="panel-head compact quick-sheet-head">
               <div>
                 <h4>Quick Add</h4>
-                <p>Choose what you want to add or manage.</p>
+                <p>Update your shared ledger.</p>
               </div>
+              <button className="quick-close" type="button" aria-label="Close quick add" onClick={() => setQuickAddOpen(false)}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
             </div>
 
             <div className="quick-add-grid" role="list" aria-label="Quick add actions">
-              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("income")}>
-                <span className="quick-add-kicker">Dashboard</span>
-                <strong>Income</strong>
-                <p>Add, edit, or remove income streams.</p>
+              <button className="quick-add-option tone-income" type="button" onClick={() => handleQuickAddSelection("income")}>
+                <div className="quick-add-icon income">
+                  <span className="material-symbols-outlined">trending_up</span>
+                </div>
+                <div>
+                  <strong>Add Income</strong>
+                  <span className="quick-add-meta">Deposit funds</span>
+                </div>
               </button>
-              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("expense")}>
-                <span className="quick-add-kicker">Expenses</span>
-                <strong>Expense</strong>
-                <p>Create or update recurring and variable expenses.</p>
+              <button className="quick-add-option tone-expense" type="button" onClick={() => handleQuickAddSelection("expense")}>
+                <div className="quick-add-icon expense">
+                  <span className="material-symbols-outlined">receipt_long</span>
+                </div>
+                <div>
+                  <strong>Log Expense</strong>
+                  <span className="quick-add-meta">Recent spend</span>
+                </div>
               </button>
-              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("bill")}>
-                <span className="quick-add-kicker">Bills</span>
-                <strong>Bill</strong>
-                <p>Track due dates, owners, and payment state.</p>
+              <button className="quick-add-option tone-bill" type="button" onClick={() => handleQuickAddSelection("bill")}>
+                <div className="quick-add-icon bill">
+                  <span className="material-symbols-outlined">calendar_month</span>
+                </div>
+                <div>
+                  <strong>Schedule Bill</strong>
+                  <span className="quick-add-meta">Future dues</span>
+                </div>
               </button>
-              <button className="quick-add-option" type="button" onClick={() => handleQuickAddSelection("savings")}>
-                <span className="quick-add-kicker">Goals</span>
-                <strong>Investment / Savings</strong>
-                <p>Add a contribution and choose the contribution type.</p>
+              <button className="quick-add-option tone-goal" type="button" onClick={() => handleQuickAddSelection("savings")}>
+                <div className="quick-add-icon goal">
+                  <span className="material-symbols-outlined">ads_click</span>
+                </div>
+                <div>
+                  <strong>New Goal</strong>
+                  <span className="quick-add-meta">Growth target</span>
+                </div>
               </button>
-            </div>
-
-            <div className="button-row">
-              <button className="btn btn-ghost" type="button" onClick={() => setQuickAddOpen(false)}>Cancel</button>
             </div>
           </section>
         </div>
