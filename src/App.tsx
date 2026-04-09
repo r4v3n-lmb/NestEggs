@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { BudgetCategoryLimit, ExpenseItem, IncomeSource, SavingsGoal } from "./types";
 import { mockBudgetLimits, mockExpenses, mockGoals, mockIncomes } from "./data/mock";
 import { authApi } from "./firebase";
 import { money, toPercent } from "./lib/format";
@@ -19,44 +20,82 @@ const navItems: NavItem[] = [
 ];
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [joinCode, setJoinCode] = useState("");
+  const [authStatus, setAuthStatus] = useState<string>("Sign in to continue.");
+
+  const [incomes, setIncomes] = useState<IncomeSource[]>(mockIncomes);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>(mockExpenses);
+  const [goals, setGoals] = useState<SavingsGoal[]>(mockGoals);
+  const [budgetLimits, setBudgetLimits] = useState<BudgetCategoryLimit[]>(mockBudgetLimits);
+
   const [alertThreshold, setAlertThreshold] = useState(80);
-  const [status, setStatus] = useState<string>("Not connected to Firebase auth yet.");
+  const [showGoalHistory, setShowGoalHistory] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string>("");
+  const [actionHistory, setActionHistory] = useState<string[]>([]);
+
   const { isOnline, pendingCount } = useOfflineQueue();
 
+  const addHistory = (message: string) => {
+    setActionMessage(message);
+    const time = new Intl.DateTimeFormat("en-ZA", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+    setActionHistory((prev) => [`${time} - ${message}`, ...prev].slice(0, 8));
+  };
+
+  const runAuth = async (type: "signin" | "signup" | "google" | "apple") => {
+    try {
+      if (type === "signin") await authApi.signIn(email, password);
+      if (type === "signup") await authApi.signUp(email, password);
+      if (type === "google") await authApi.signInGoogle();
+      if (type === "apple") await authApi.signInApple();
+
+      setAuthStatus("Authentication successful.");
+      setIsAuthenticated(true);
+      addHistory("Signed in successfully.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Authentication failed.";
+      setAuthStatus(message);
+    }
+  };
+
+  const enterDemoMode = () => {
+    setAuthStatus("Demo mode enabled.");
+    setIsAuthenticated(true);
+    addHistory("Entered demo mode without Firebase authentication.");
+  };
+
   const totals = useMemo(() => {
-    const incomeTotal = mockIncomes.reduce((sum, item) => sum + item.amount, 0);
-    const expenseTotal = mockExpenses.reduce((sum, item) => sum + item.amount, 0);
+    const incomeTotal = incomes.reduce((sum, item) => sum + item.amount, 0);
+    const expenseTotal = expenses.reduce((sum, item) => sum + item.amount, 0);
     const cashflow = incomeTotal - expenseTotal;
     const savingsRate = incomeTotal > 0 ? Math.max(0, cashflow) / incomeTotal : 0;
 
-    const debtPayments = mockExpenses
+    const debtPayments = expenses
       .filter((item) => item.category.toLowerCase() === "debt" || item.subcategory.toLowerCase().includes("payment"))
       .reduce((sum, item) => sum + item.amount, 0);
     const debtRatio = incomeTotal > 0 ? debtPayments / incomeTotal : 0;
 
-    const limitsTotal = mockBudgetLimits.reduce((sum, item) => sum + item.limit, 0);
+    const limitsTotal = budgetLimits.reduce((sum, item) => sum + item.limit, 0);
     const budgetVariance = limitsTotal - expenseTotal;
 
     return { incomeTotal, expenseTotal, cashflow, savingsRate, debtRatio, budgetVariance };
-  }, []);
+  }, [budgetLimits, expenses, incomes]);
 
   const categorySpend = useMemo(() => {
-    return mockBudgetLimits.map((limit) => {
-      const spent = mockExpenses
+    return budgetLimits.map((limit) => {
+      const spent = expenses
         .filter((expense) => expense.category === limit.category)
         .reduce((sum, expense) => sum + expense.amount, 0);
       const ratio = limit.limit > 0 ? spent / limit.limit : 0;
       return { ...limit, spent, ratio };
     });
-  }, []);
+  }, [budgetLimits, expenses]);
 
   const expenseByCategory = useMemo(() => {
     const map = new Map<string, number>();
-    for (const expense of mockExpenses) {
+    for (const expense of expenses) {
       map.set(expense.category, (map.get(expense.category) ?? 0) + expense.amount);
     }
 
@@ -67,11 +106,11 @@ export default function App() {
         share: totals.expenseTotal > 0 ? amount / totals.expenseTotal : 0
       }))
       .sort((a, b) => b.amount - a.amount);
-  }, [totals.expenseTotal]);
+  }, [expenses, totals.expenseTotal]);
 
   const recurringBills = useMemo(
-    () => mockExpenses.filter((expense) => expense.isRecurring).sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "")),
-    []
+    () => expenses.filter((expense) => expense.isRecurring).sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "")),
+    [expenses]
   );
 
   const notifications = useMemo(() => {
@@ -80,7 +119,7 @@ export default function App() {
       .filter((row) => row.ratio * 100 >= alertThreshold)
       .map((row) => `${row.category} is at ${Math.round(row.ratio * 100)}% of budget.`);
 
-    const overdueBills = mockExpenses
+    const overdueBills = expenses
       .filter((expense) => expense.isRecurring && !expense.isPaid && expense.dueDate)
       .filter((expense) => {
         const dueDate = new Date(expense.dueDate as string);
@@ -90,23 +129,10 @@ export default function App() {
       .map((expense) => `${expense.subcategory} is overdue by 2+ days.`);
 
     return [...byBudget, ...overdueBills];
-  }, [alertThreshold, categorySpend]);
-
-  const runAuth = async (type: "signin" | "signup" | "google" | "apple") => {
-    try {
-      if (type === "signin") await authApi.signIn(email, password);
-      if (type === "signup") await authApi.signUp(email, password);
-      if (type === "google") await authApi.signInGoogle();
-      if (type === "apple") await authApi.signInApple();
-      setStatus("Auth request completed. Next step is join code household linking.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Auth error";
-      setStatus(`Auth failed: ${message}`);
-    }
-  };
+  }, [alertThreshold, categorySpend, expenses]);
 
   const monthLabel = new Intl.DateTimeFormat("en-ZA", { month: "long", year: "numeric" }).format(new Date());
-  const primaryGoal = mockGoals[0];
+  const primaryGoal = goals[0];
   const goalProgress = primaryGoal ? Math.min(100, Math.round((primaryGoal.currentAmount / primaryGoal.targetAmount) * 100)) : 0;
 
   const donutGradient = useMemo(() => {
@@ -124,10 +150,85 @@ export default function App() {
     return `conic-gradient(${segments.join(", ")})`;
   }, [expenseByCategory]);
 
+  const handleAddFunds = () => {
+    setIncomes((prev) => prev.map((income, idx) => (idx === 0 ? { ...income, amount: income.amount + 500 } : income)));
+    addHistory("Added R500.00 to Primary Salary.");
+  };
+
+  const handleAdjustFoodBudget = () => {
+    setBudgetLimits((prev) => prev.map((limit) => (limit.category === "Groceries" ? { ...limit, limit: limit.limit + 250 } : limit)));
+    addHistory("Raised Groceries budget by R250.00.");
+  };
+
+  const handleAddContribution = () => {
+    setGoals((prev) =>
+      prev.map((goal, idx) =>
+        idx === 0
+          ? {
+              ...goal,
+              currentAmount: Math.min(goal.currentAmount + 500, goal.targetAmount)
+            }
+          : goal
+      )
+    );
+    addHistory("Added R500.00 contribution to primary goal.");
+  };
+
+  const handleViewHistory = () => {
+    setShowGoalHistory((prev) => !prev);
+    addHistory(showGoalHistory ? "Collapsed contribution history." : "Opened contribution history.");
+  };
+
+  const handleMarkBillPaid = (billId: string) => {
+    setExpenses((prev) => prev.map((bill) => (bill.id === billId ? { ...bill, isPaid: true } : bill)));
+    addHistory("Marked recurring bill as paid.");
+  };
+
+  const handleFab = () => {
+    setActiveTab("expenses");
+    addHistory("Quick add opened the Expenses section.");
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <main className="auth-mask-root">
+        <section className="auth-mask-card">
+          <p className="eyebrow">NestEggs</p>
+          <h1 className="brand-title">Welcome Back</h1>
+          <p className="muted">Authenticate before opening your household dashboard.</p>
+
+          <div className="auth-grid">
+            <label>
+              Email
+              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+            </label>
+            <label>
+              Password
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                type="password"
+                placeholder="********"
+              />
+            </label>
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={() => void runAuth("signin")}>Sign In</button>
+              <button className="btn btn-secondary" type="button" onClick={() => void runAuth("signup")}>Create Account</button>
+              <button className="btn btn-ghost" type="button" onClick={() => void runAuth("google")}>Google</button>
+              <button className="btn btn-ghost" type="button" onClick={() => void runAuth("apple")}>Apple</button>
+            </div>
+            <button className="btn btn-primary" type="button" onClick={enterDemoMode}>Continue in Demo Mode</button>
+            <p className="muted">{authStatus}</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const renderDashboard = () => (
     <>
       <section className="editorial-head">
-        <h2>Morning, Unity.</h2>
+        <h2>Morning, Bronwen Anderson.</h2>
         <p>Shared household planning for {monthLabel}. Built for connected decisions and clear priorities.</p>
         <div className="status-strip">
           <span className={`status-pill ${isOnline ? "ok" : "warn"}`}>{isOnline ? "Online sync" : "Offline mode"}</span>
@@ -162,10 +263,10 @@ export default function App() {
                 <p className="eyebrow">Total Shared Balance</p>
                 <h3>{money(totals.incomeTotal - totals.expenseTotal)}</h3>
               </div>
-              <button className="btn btn-primary" type="button">Add Funds</button>
+              <button className="btn btn-primary" type="button" onClick={handleAddFunds}>Add Funds</button>
             </div>
             <div className="income-track-grid">
-              {mockIncomes.map((income, idx) => {
+              {incomes.map((income, idx) => {
                 const width = Math.max(8, Math.min(100, Math.round((income.amount / totals.incomeTotal) * 100)));
                 return (
                   <article key={income.id} className={`income-tile ${idx % 2 === 1 ? "offset" : ""}`}>
@@ -195,43 +296,6 @@ export default function App() {
               <p className="goal-foot">{goalProgress}% complete. Annual tax-free limit: {money(primaryGoal.taxFreeLimit)}.</p>
             </article>
           ) : null}
-
-          <article className="panel auth-panel">
-            <div className="panel-head compact">
-              <div>
-                <h4>Auth + Household</h4>
-                <p>Email/password and social sign-in scaffold with join-code linking.</p>
-              </div>
-            </div>
-            <div className="auth-grid">
-              <label>
-                Email
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-              </label>
-              <label>
-                Password
-                <input
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  type="password"
-                  placeholder="********"
-                />
-              </label>
-              <div className="button-row">
-                <button className="btn btn-primary" type="button" onClick={() => void runAuth("signin")}>Sign In</button>
-                <button className="btn btn-secondary" type="button" onClick={() => void runAuth("signup")}>Create</button>
-                <button className="btn btn-ghost" type="button" onClick={() => void runAuth("google")}>Google</button>
-                <button className="btn btn-ghost" type="button" onClick={() => void runAuth("apple")}>Apple</button>
-              </div>
-              <div id="phone-recaptcha" />
-              <label>
-                Household Join Code
-                <input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="ABC123" />
-              </label>
-              <button className="btn btn-primary" type="button" disabled={!joinCode.trim()}>Join Household</button>
-              <p className="muted">{status}</p>
-            </div>
-          </article>
         </div>
 
         <aside className="right-column">
@@ -280,7 +344,7 @@ export default function App() {
               </div>
             </div>
             <div className="stack-list">
-              {mockExpenses.map((expense) => (
+              {expenses.map((expense) => (
                 <article key={expense.id} className="list-card activity-item">
                   <div>
                     <strong>{expense.subcategory}</strong>
@@ -350,7 +414,7 @@ export default function App() {
 
         <article className="panel expense-highlight">
           <h4>Food Breakdown</h4>
-          {mockExpenses
+          {expenses
             .filter((expense) => expense.category === "Groceries")
             .map((expense) => (
               <div key={expense.id} className="line-item highlight-line">
@@ -358,7 +422,7 @@ export default function App() {
                 <strong>{money(expense.amount)}</strong>
               </div>
             ))}
-          <button className="btn btn-primary" type="button">Adjust Food Budget</button>
+          <button className="btn btn-primary" type="button" onClick={handleAdjustFoodBudget}>Adjust Food Budget</button>
         </article>
       </section>
 
@@ -370,7 +434,7 @@ export default function App() {
           </div>
         </div>
         <div className="activity-grid-3">
-          {mockExpenses.map((expense) => (
+          {expenses.map((expense) => (
             <article key={expense.id} className="list-card">
               <strong>{expense.subcategory}</strong>
               <p>{expense.category}</p>
@@ -423,7 +487,13 @@ export default function App() {
                 </div>
                 <div className="bill-right">
                   <p>{money(bill.amount)}</p>
-                  <span>{bill.isPaid ? "Paid" : "Upcoming"}</span>
+                  {bill.isPaid ? (
+                    <span>Paid</span>
+                  ) : (
+                    <button className="btn btn-secondary btn-inline" type="button" onClick={() => handleMarkBillPaid(bill.id)}>
+                      Mark Paid
+                    </button>
+                  )}
                 </div>
               </article>
             ))}
@@ -441,7 +511,7 @@ export default function App() {
       </section>
 
       <section className="goal-layout">
-        {mockGoals.map((goal) => {
+        {goals.map((goal, idx) => {
           const progress = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100));
           return (
             <article key={goal.id} className="panel goal-card-large">
@@ -456,10 +526,12 @@ export default function App() {
                 <span style={{ width: `${progress}%` }} />
               </div>
               <p className="goal-foot">{progress}% complete</p>
-              <div className="button-row">
-                <button className="btn btn-primary" type="button">Add Contribution</button>
-                <button className="btn btn-secondary" type="button">View History</button>
-              </div>
+              {idx === 0 ? (
+                <div className="button-row">
+                  <button className="btn btn-primary" type="button" onClick={handleAddContribution}>Add Contribution</button>
+                  <button className="btn btn-secondary" type="button" onClick={handleViewHistory}>View History</button>
+                </div>
+              ) : null}
             </article>
           );
         })}
@@ -467,20 +539,26 @@ export default function App() {
         <article className="panel">
           <div className="panel-head compact">
             <div>
-              <h4>Recent Contributions</h4>
-              <p>Latest income inflows towards goals.</p>
+              <h4>{showGoalHistory ? "Contribution History" : "Recent Contributions"}</h4>
+              <p>{showGoalHistory ? "Your latest in-app actions" : "Latest income inflows towards goals."}</p>
             </div>
           </div>
           <div className="stack-list">
-            {mockIncomes.map((income) => (
-              <article key={income.id} className="list-card activity-item">
-                <div>
-                  <strong>{income.name}</strong>
-                  <p>{income.type}</p>
-                </div>
-                <p className="amount-in">+{money(income.amount)}</p>
-              </article>
-            ))}
+            {showGoalHistory
+              ? actionHistory.map((item) => (
+                  <article key={item} className="list-card">
+                    <p>{item}</p>
+                  </article>
+                ))
+              : incomes.map((income) => (
+                  <article key={income.id} className="list-card activity-item">
+                    <div>
+                      <strong>{income.name}</strong>
+                      <p>{income.type}</p>
+                    </div>
+                    <p className="amount-in">+{money(income.amount)}</p>
+                  </article>
+                ))}
           </div>
         </article>
       </section>
@@ -493,7 +571,7 @@ export default function App() {
         <div className="brand-row">
           <div className="avatar-stack" aria-hidden>
             <span className="avatar-chip">RL</span>
-            <span className="avatar-chip partner">UL</span>
+            <span className="avatar-chip partner">BA</span>
           </div>
           <div>
             <p className="eyebrow">NestEggs</p>
@@ -515,6 +593,7 @@ export default function App() {
       </header>
 
       <main className="ledger-main">
+        {actionMessage ? <p className="action-banner">{actionMessage}</p> : null}
         {activeTab === "dashboard" ? renderDashboard() : null}
         {activeTab === "expenses" ? renderExpenses() : null}
         {activeTab === "bills" ? renderBills() : null}
@@ -534,7 +613,7 @@ export default function App() {
         ))}
       </nav>
 
-      <button className="fab" type="button" aria-label="Add transaction">+</button>
+      <button className="fab" type="button" aria-label="Add transaction" onClick={handleFab}>+</button>
     </div>
   );
 }
