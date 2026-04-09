@@ -137,6 +137,20 @@ button {
   color: var(--primary);
 }
 
+.version-chip {
+  display: inline-block;
+  margin-top: 0.2rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  background: var(--surface-high);
+  color: var(--ink-muted);
+  font-family: "Inter", sans-serif;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .eyebrow {
   font-family: "Inter", sans-serif;
   font-size: 0.68rem;
@@ -822,6 +836,110 @@ select {
   margin-top: 0.15rem;
 }
 
+.viz-panel {
+  background: var(--surface-lowest);
+}
+
+.cashflow-bars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.cashflow-bar-card {
+  background: var(--surface-low);
+  border-radius: 1rem;
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.cashflow-bar-card p {
+  font-family: "Inter", sans-serif;
+  font-size: 0.67rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cashflow-bar-card strong {
+  font-size: 0.9rem;
+}
+
+.cashflow-track {
+  height: 6.2rem;
+  border-radius: 0.8rem;
+  display: flex;
+  align-items: end;
+  overflow: hidden;
+  background: var(--surface-high);
+}
+
+.cashflow-track span {
+  display: block;
+  width: 100%;
+  border-radius: 0.7rem 0.7rem 0.3rem 0.3rem;
+}
+
+.cashflow-track span.income {
+  background: linear-gradient(180deg, #1b6d24, #4a9d53);
+}
+
+.cashflow-track span.expense {
+  background: linear-gradient(180deg, #6b2c00, #b0592e);
+}
+
+.bill-visual-panel {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.85rem;
+  align-items: center;
+}
+
+.bill-status-donut {
+  width: 5.8rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.bill-status-core {
+  width: 68%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--surface-lowest);
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.bill-status-core strong {
+  font-size: 0.86rem;
+  color: var(--primary);
+}
+
+.bill-status-core p {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.bill-status-meta {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.goal-snapshot-panel {
+  background: var(--surface-lowest);
+}
+
+.goal-snapshot-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
 .goal-layout {
   align-items: start;
 }
@@ -1116,11 +1234,9 @@ select {
   .goal-layout > .panel .stack-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}
 
-@media (max-width: 389px) {
-  .quick-add-grid {
-    grid-template-columns: 1fr;
+  .goal-snapshot-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1159,6 +1275,10 @@ select {
 
   .budget-panel .stack-list,
   .activity-panel .stack-list {
+    grid-template-columns: 1fr;
+  }
+
+  .goal-snapshot-list {
     grid-template-columns: 1fr;
   }
 

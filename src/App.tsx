@@ -48,6 +48,7 @@ const questTasks: QuestTask[] = [
 
 const QUEST_PROGRESS_KEY = "nesteggs_nav_quest_progress_v1";
 const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
+const APP_VERSION = "v0.1.1";
 const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
 
@@ -327,6 +328,47 @@ export default function App() {
 
     return `conic-gradient(${segments.join(", ")})`;
   }, [expenseByCategory]);
+
+  const cashflowSeries = useMemo(() => {
+    const maxValue = Math.max(totals.incomeTotal, totals.expenseTotal, 1);
+    return [
+      {
+        id: "income",
+        label: "Income",
+        amount: totals.incomeTotal,
+        percent: Math.round((totals.incomeTotal / maxValue) * 100)
+      },
+      {
+        id: "expenses",
+        label: "Expenses",
+        amount: totals.expenseTotal,
+        percent: Math.round((totals.expenseTotal / maxValue) * 100)
+      }
+    ];
+  }, [totals.expenseTotal, totals.incomeTotal]);
+
+  const billStatus = useMemo(() => {
+    const paid = bills.filter((bill) => bill.isPaid).length;
+    const open = Math.max(0, bills.length - paid);
+    const total = Math.max(1, bills.length);
+    const paidShare = paid / total;
+    const gradient = `conic-gradient(#1b6d24 0deg ${Math.round(paidShare * 360)}deg, #e0e3e3 ${Math.round(
+      paidShare * 360
+    )}deg 360deg)`;
+    return { paid, open, total, paidShare, gradient };
+  }, [bills]);
+
+  const goalProgressSeries = useMemo(
+    () =>
+      goals.map((goal) => ({
+        id: goal.id,
+        title: goal.title,
+        progress: Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)),
+        currentAmount: goal.currentAmount,
+        targetAmount: goal.targetAmount
+      })),
+    [goals]
+  );
 
   const questScore = useMemo(
     () => questTasks.reduce((sum, task) => sum + (questProgress[task.id] ? task.points : 0), 0),
@@ -749,6 +791,7 @@ export default function App() {
           <img className="auth-logo" src={APP_LOGO_SRC} alt="NestEggs logo" />
           <p className="eyebrow">NestEggs</p>
           <h1 className="brand-title">Welcome Back</h1>
+          <p className="version-chip">{APP_VERSION}</p>
           <p className="muted">Authenticate before opening your household dashboard.</p>
 
           <div className="auth-grid">
@@ -928,6 +971,26 @@ export default function App() {
               )}
             </div>
           </article>
+
+          <article className="panel viz-panel">
+            <div className="panel-head compact">
+              <div>
+                <h4>Cashflow Split</h4>
+                <p>Income versus expense volume this month.</p>
+              </div>
+            </div>
+            <div className="cashflow-bars" role="img" aria-label="Cashflow comparison chart">
+              {cashflowSeries.map((item) => (
+                <article key={item.id} className="cashflow-bar-card">
+                  <p>{item.label}</p>
+                  <div className="cashflow-track" aria-hidden>
+                    <span className={item.id === "income" ? "income" : "expense"} style={{ height: `${item.percent}%` }} />
+                  </div>
+                  <strong>{money(item.amount)}</strong>
+                </article>
+              ))}
+            </div>
+          </article>
         </aside>
       </section>
     </>
@@ -1022,6 +1085,19 @@ export default function App() {
               </article>
             )}
           </div>
+          <div className="bill-visual-panel">
+            <div className="bill-status-donut" style={{ background: billStatus.gradient }}>
+              <div className="bill-status-core">
+                <strong>{Math.round(billStatus.paidShare * 100)}%</strong>
+                <p>Paid</p>
+              </div>
+            </div>
+            <div className="bill-status-meta">
+              <p><strong>{billStatus.paid}</strong> paid bills</p>
+              <p><strong>{billStatus.open}</strong> open bills</p>
+              <p>{billStatus.total} total tracked</p>
+            </div>
+          </div>
         </article>
 
         <article className="panel">
@@ -1065,6 +1141,29 @@ export default function App() {
       </section>
 
       <section className="goal-layout">
+        <article className="panel goal-snapshot-panel">
+          <div className="panel-head compact">
+            <div>
+              <h4>Goals Snapshot</h4>
+              <p>Progress distribution across all active goals.</p>
+            </div>
+          </div>
+          <div className="goal-snapshot-list">
+            {goalProgressSeries.map((goal) => (
+              <article key={goal.id} className="list-card">
+                <div className="line-item">
+                  <strong>{goal.title}</strong>
+                  <span className="ok-text">{goal.progress}%</span>
+                </div>
+                <div className="meter" aria-hidden>
+                  <span style={{ width: `${goal.progress}%` }} />
+                </div>
+                <p>{money(goal.currentAmount)} / {money(goal.targetAmount)}</p>
+              </article>
+            ))}
+          </div>
+        </article>
+
         {goals.map((goal, idx) => {
           const progress = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100));
           return (
@@ -1177,6 +1276,7 @@ export default function App() {
           <div>
             <p className="eyebrow">NestEggs</p>
             <h1 className="brand-title">Our Ledger</h1>
+            <p className="version-chip">{APP_VERSION}</p>
           </div>
         </div>
         <nav className="desktop-nav" aria-label="Primary">
