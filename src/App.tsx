@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { BudgetCategoryLimit, ExpenseItem, IncomeSource, SavingsGoal } from "./types";
 import { mockBudgetLimits, mockExpenses, mockGoals, mockIncomes } from "./data/mock";
 import { authApi } from "./firebase";
@@ -19,6 +19,36 @@ const navItems: NavItem[] = [
   { id: "goals", label: "Goals" }
 ];
 
+type QuestTaskId =
+  | "visit_dashboard"
+  | "visit_expenses"
+  | "adjust_food_budget"
+  | "visit_bills"
+  | "mark_bill_paid"
+  | "visit_goals"
+  | "add_contribution"
+  | "open_history";
+
+type QuestTask = {
+  id: QuestTaskId;
+  label: string;
+  points: number;
+};
+
+const questTasks: QuestTask[] = [
+  { id: "visit_dashboard", label: "Visit Dashboard", points: 10 },
+  { id: "visit_expenses", label: "Visit Expenses", points: 10 },
+  { id: "adjust_food_budget", label: "Adjust Food Budget", points: 15 },
+  { id: "visit_bills", label: "Visit Bills", points: 10 },
+  { id: "mark_bill_paid", label: "Mark one bill as paid", points: 20 },
+  { id: "visit_goals", label: "Visit Goals", points: 10 },
+  { id: "add_contribution", label: "Add a contribution", points: 25 },
+  { id: "open_history", label: "Open contribution history", points: 10 }
+];
+
+const QUEST_PROGRESS_KEY = "nesteggs_nav_quest_progress_v1";
+const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
@@ -35,8 +65,30 @@ export default function App() {
   const [showGoalHistory, setShowGoalHistory] = useState(false);
   const [actionMessage, setActionMessage] = useState<string>("");
   const [actionHistory, setActionHistory] = useState<string[]>([]);
+  const [questOpen, setQuestOpen] = useState<boolean>(() => {
+    const raw = localStorage.getItem(QUEST_OPEN_KEY);
+    return raw ? raw === "true" : true;
+  });
+  const [questProgress, setQuestProgress] = useState<Record<QuestTaskId, boolean>>(() => {
+    const base = Object.fromEntries(questTasks.map((task) => [task.id, false])) as Record<QuestTaskId, boolean>;
+    const raw = localStorage.getItem(QUEST_PROGRESS_KEY);
+    if (!raw) return base;
+    try {
+      const saved = JSON.parse(raw) as Partial<Record<QuestTaskId, boolean>>;
+      return { ...base, ...saved };
+    } catch {
+      return base;
+    }
+  });
 
   const { isOnline, pendingCount } = useOfflineQueue();
+
+  const markQuest = (taskId: QuestTaskId) => {
+    setQuestProgress((prev) => {
+      if (prev[taskId]) return prev;
+      return { ...prev, [taskId]: true };
+    });
+  };
 
   const addHistory = (message: string) => {
     setActionMessage(message);
@@ -150,6 +202,44 @@ export default function App() {
     return `conic-gradient(${segments.join(", ")})`;
   }, [expenseByCategory]);
 
+  const questScore = useMemo(
+    () => questTasks.reduce((sum, task) => sum + (questProgress[task.id] ? task.points : 0), 0),
+    [questProgress]
+  );
+  const questMaxScore = useMemo(() => questTasks.reduce((sum, task) => sum + task.points, 0), []);
+  const questCompletedCount = useMemo(
+    () => questTasks.filter((task) => questProgress[task.id]).length,
+    [questProgress]
+  );
+  const questDone = questCompletedCount === questTasks.length;
+  const questPercent = Math.round((questCompletedCount / questTasks.length) * 100);
+  const questBadge = questScore >= 90 ? "Household Captain" : questScore >= 40 ? "Planner" : "Navigator";
+
+  useEffect(() => {
+    localStorage.setItem(QUEST_PROGRESS_KEY, JSON.stringify(questProgress));
+  }, [questProgress]);
+
+  useEffect(() => {
+    localStorage.setItem(QUEST_OPEN_KEY, String(questOpen));
+  }, [questOpen]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (activeTab === "dashboard") markQuest("visit_dashboard");
+    if (activeTab === "expenses") markQuest("visit_expenses");
+    if (activeTab === "bills") markQuest("visit_bills");
+    if (activeTab === "goals") markQuest("visit_goals");
+  }, [activeTab, isAuthenticated]);
+
+  useEffect(() => {
+    if (questDone) {
+      addHistory("Navigation Quest completed. You unlocked Household Captain.");
+      setActionMessage("Navigation Quest complete. You are ready to drive the full app.");
+      setQuestOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questDone]);
+
   const handleAddFunds = () => {
     setIncomes((prev) => prev.map((income, idx) => (idx === 0 ? { ...income, amount: income.amount + 500 } : income)));
     addHistory("Added R500.00 to Primary Salary.");
@@ -157,6 +247,7 @@ export default function App() {
 
   const handleAdjustFoodBudget = () => {
     setBudgetLimits((prev) => prev.map((limit) => (limit.category === "Groceries" ? { ...limit, limit: limit.limit + 250 } : limit)));
+    markQuest("adjust_food_budget");
     addHistory("Raised Groceries budget by R250.00.");
   };
 
@@ -171,16 +262,22 @@ export default function App() {
           : goal
       )
     );
+    markQuest("add_contribution");
     addHistory("Added R500.00 contribution to primary goal.");
   };
 
   const handleViewHistory = () => {
-    setShowGoalHistory((prev) => !prev);
-    addHistory(showGoalHistory ? "Collapsed contribution history." : "Opened contribution history.");
+    setShowGoalHistory((prev) => {
+      const next = !prev;
+      if (next) markQuest("open_history");
+      addHistory(next ? "Opened contribution history." : "Collapsed contribution history.");
+      return next;
+    });
   };
 
   const handleMarkBillPaid = (billId: string) => {
     setExpenses((prev) => prev.map((bill) => (bill.id === billId ? { ...bill, isPaid: true } : bill)));
+    markQuest("mark_bill_paid");
     addHistory("Marked recurring bill as paid.");
   };
 
@@ -565,6 +662,35 @@ export default function App() {
     </section>
   );
 
+  const renderQuestGuide = () => (
+    <aside className={`quest-card ${questDone ? "complete" : ""}`}>
+      <div className="quest-head">
+        <div>
+          <p className="eyebrow">Welcome Quest</p>
+          <h3>Learn The Navigation</h3>
+        </div>
+        <button className="btn btn-ghost" type="button" onClick={() => setQuestOpen(false)}>
+          Minimize
+        </button>
+      </div>
+      <p className="muted">
+        Score: {questScore}/{questMaxScore} · Badge: {questBadge}
+      </p>
+      <div className="quest-progress">
+        <span style={{ width: `${questPercent}%` }} />
+      </div>
+      <p className="muted">{questCompletedCount} of {questTasks.length} tasks completed.</p>
+      <div className="quest-list">
+        {questTasks.map((task) => (
+          <article key={task.id} className={`quest-task ${questProgress[task.id] ? "done" : ""}`}>
+            <p>{task.label}</p>
+            <strong>+{task.points}</strong>
+          </article>
+        ))}
+      </div>
+    </aside>
+  );
+
   return (
     <div className="ledger-root">
       <header className="topbar">
@@ -593,6 +719,12 @@ export default function App() {
       </header>
 
       <main className="ledger-main">
+        {!questOpen ? (
+          <button className="btn btn-secondary quest-reopen" type="button" onClick={() => setQuestOpen(true)}>
+            Open Navigation Quest
+          </button>
+        ) : null}
+        {questOpen ? renderQuestGuide() : null}
         {actionMessage ? <p className="action-banner">{actionMessage}</p> : null}
         {activeTab === "dashboard" ? renderDashboard() : null}
         {activeTab === "expenses" ? renderExpenses() : null}

@@ -153,6 +153,84 @@ button {
   padding: 0.75rem clamp(1rem, 4vw, 2.2rem);
 }
 
+.quest-card {
+  margin-bottom: 0.75rem;
+  background: var(--surface-lowest);
+  border-radius: 1.2rem;
+  padding: 0.8rem;
+  box-shadow: 0 10px 26px rgba(25, 28, 28, 0.06);
+}
+
+.quest-card.complete {
+  background: linear-gradient(120deg, rgba(160, 243, 153, 0.26), rgba(138, 211, 215, 0.22), var(--surface-lowest));
+}
+
+.quest-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: flex-start;
+}
+
+.quest-head h3 {
+  margin-top: 0.1rem;
+  color: var(--primary);
+}
+
+.quest-progress {
+  margin: 0.45rem 0;
+  height: 0.52rem;
+  border-radius: 999px;
+  background: var(--surface-high);
+  overflow: hidden;
+}
+
+.quest-progress span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+}
+
+.quest-list {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.quest-task {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: center;
+  border-radius: 0.7rem;
+  padding: 0.46rem 0.56rem;
+  background: var(--surface-low);
+}
+
+.quest-task p {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.quest-task strong {
+  font-size: 0.74rem;
+  color: var(--primary);
+  font-family: "Inter", sans-serif;
+}
+
+.quest-task.done {
+  background: rgba(160, 243, 153, 0.28);
+}
+
+.quest-task.done p,
+.quest-task.done strong {
+  color: #14551a;
+}
+
+.quest-reopen {
+  margin-bottom: 0.6rem;
+}
+
 .action-banner {
   margin: 0 0 0.7rem;
   padding: 0.6rem 0.72rem;
