@@ -925,6 +925,13 @@ select {
   text-transform: uppercase;
 }
 
+.cashflow-bar-card p.cashflow-sub {
+  font-size: 0.66rem;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink-muted);
+}
+
 .cashflow-bar-card strong {
   font-size: 0.9rem;
 }
@@ -948,8 +955,50 @@ select {
   background: linear-gradient(180deg, #1b6d24, #4a9d53);
 }
 
-.cashflow-track span.expense {
+.cashflow-track span.expenses {
   background: linear-gradient(180deg, #6b2c00, #b0592e);
+}
+
+.cashflow-track span.bills {
+  background: linear-gradient(180deg, #00464a, #0d7f84);
+}
+
+.cashflow-track span.goals {
+  background: linear-gradient(180deg, #2f5f0d, #5c9b2d);
+}
+
+.dashboard-goal-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.dashboard-goal-tile {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.55rem;
+  align-items: center;
+  background: var(--surface-low);
+}
+
+.dashboard-goal-donut {
+  width: 2.9rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.dashboard-goal-core {
+  width: 68%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--surface-lowest);
+  display: grid;
+  place-items: center;
+  font-family: "Inter", sans-serif;
+  font-size: 0.53rem;
+  font-weight: 700;
+  color: var(--primary);
 }
 
 .bill-visual-panel {
@@ -1404,6 +1453,26 @@ select {
   padding: 1rem 1.35rem 1.8rem;
 }
 
+.app-sheet {
+  width: min(760px, 100%);
+  border-radius: 2.5rem 2.5rem 0 0;
+  padding: 0.9rem 1.2rem 1.7rem;
+}
+
+.app-sheet::before {
+  content: "";
+  display: block;
+  width: 3rem;
+  height: 0.33rem;
+  border-radius: 999px;
+  margin: 0.15rem auto 0.95rem;
+  background: rgba(111, 121, 121, 0.3);
+}
+
+.app-sheet > .panel-head.compact {
+  margin-bottom: 0.95rem;
+}
+
 .sheet-handle {
   width: 3rem;
   height: 0.33rem;
@@ -1736,6 +1805,10 @@ select {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .dashboard-goal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .settings-actions-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1770,6 +1843,10 @@ select {
 
   .brand-row {
     padding-right: 7rem;
+  }
+
+  .dashboard-goal-grid {
+    grid-template-columns: 1fr;
   }
 
   .settings-row {

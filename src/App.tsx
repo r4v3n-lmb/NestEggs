@@ -51,7 +51,7 @@ const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
 const PROFILE_SETTINGS_KEY = "nesteggs_profile_settings_v1";
 const THEME_MODE_KEY = "nesteggs_theme_mode_v1";
 const SETTINGS_PREFS_KEY = "nesteggs_settings_prefs_v1";
-const APP_VERSION = "v0.1.2";
+const APP_VERSION = "v0.1.3";
 const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
 const FCM_TOKEN_KEY = "nesteggs_fcm_token_v1";
@@ -503,8 +503,6 @@ export default function App() {
   }, [alertThreshold, bills, categorySpend]);
 
   const monthLabel = new Intl.DateTimeFormat("en-ZA", { month: "long", year: "numeric" }).format(new Date());
-  const primaryGoal = goals[0];
-  const goalProgress = primaryGoal ? Math.min(100, Math.round((primaryGoal.currentAmount / primaryGoal.targetAmount) * 100)) : 0;
 
   const donutGradient = useMemo(() => {
     if (expenseByCategory.length === 0) return "conic-gradient(#e0e3e3 0deg, #e0e3e3 360deg)";
@@ -521,23 +519,52 @@ export default function App() {
     return `conic-gradient(${segments.join(", ")})`;
   }, [expenseByCategory]);
 
+  const monthlyGoalContribution = useMemo(
+    () =>
+      goals.reduce((sum, goal) => {
+        if (!goal.isRecurring || goal.recurringAmount <= 0) return sum;
+        if (goal.recurrence === "Weekly") return sum + Math.round((goal.recurringAmount * 52) / 12);
+        if (goal.recurrence === "Quarterly") return sum + Math.round(goal.recurringAmount / 3);
+        return sum + goal.recurringAmount;
+      }, 0),
+    [goals]
+  );
+
   const cashflowSeries = useMemo(() => {
-    const maxValue = Math.max(totals.incomeTotal, totals.expenseTotal, 1);
+    const billsTotal = bills.reduce((sum, bill) => sum + bill.amount, 0);
+    const maxValue = Math.max(totals.incomeTotal, totals.expenseTotal, billsTotal, monthlyGoalContribution, 1);
+    const incomeBase = Math.max(1, totals.incomeTotal);
     return [
       {
         id: "income",
         label: "Income",
         amount: totals.incomeTotal,
-        percent: Math.round((totals.incomeTotal / maxValue) * 100)
+        percent: Math.round((totals.incomeTotal / maxValue) * 100),
+        allocationPercent: 100
       },
       {
         id: "expenses",
         label: "Expenses",
         amount: totals.expenseTotal,
-        percent: Math.round((totals.expenseTotal / maxValue) * 100)
+        percent: Math.round((totals.expenseTotal / maxValue) * 100),
+        allocationPercent: Math.round((totals.expenseTotal / incomeBase) * 100)
+      },
+      {
+        id: "bills",
+        label: "Bills",
+        amount: billsTotal,
+        percent: Math.round((billsTotal / maxValue) * 100),
+        allocationPercent: Math.round((billsTotal / incomeBase) * 100)
+      },
+      {
+        id: "goals",
+        label: "Goals",
+        amount: monthlyGoalContribution,
+        percent: Math.round((monthlyGoalContribution / maxValue) * 100),
+        allocationPercent: Math.round((monthlyGoalContribution / incomeBase) * 100)
       }
     ];
-  }, [totals.expenseTotal, totals.incomeTotal]);
+  }, [bills, monthlyGoalContribution, totals.expenseTotal, totals.incomeTotal]);
 
   const billStatus = useMemo(() => {
     const paid = bills.filter((bill) => bill.isPaid).length;
@@ -550,14 +577,18 @@ export default function App() {
     return { paid, open, total, paidShare, gradient };
   }, [bills]);
 
-  const goalProgressSeries = useMemo(
+  const goalOverviewSeries = useMemo(
     () =>
       goals.map((goal) => ({
         id: goal.id,
+        goalType: goal.goalType,
         title: goal.title,
         progress: Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)),
         currentAmount: goal.currentAmount,
-        targetAmount: goal.targetAmount
+        targetAmount: goal.targetAmount,
+        gradient: `conic-gradient(#00464a 0deg ${Math.round(
+          Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)) * 3.6
+        )}deg, #e0e3e3 ${Math.round(Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)) * 3.6)}deg 360deg)`
       })),
     [goals]
   );
@@ -711,6 +742,7 @@ export default function App() {
       }))
     );
     setFundsModalOpen(true);
+    addHistory("Opened Manage Income.");
   };
 
   const showToast = (kind: ToastState["kind"], message: string) => {
@@ -1608,21 +1640,36 @@ export default function App() {
             </div>
           </article>
 
-          {primaryGoal ? (
-            <article className="panel goal-panel">
-              <div className="goal-head">
-                <div>
-                  <p className="eyebrow">Primary Goal</p>
-                  <h4>{primaryGoal.title}</h4>
-                </div>
-                <p className="goal-amount">{money(primaryGoal.currentAmount)} / {money(primaryGoal.targetAmount)}</p>
+          <article className="panel goal-panel">
+            <div className="panel-head compact">
+              <div>
+                <h4>Goal Progress</h4>
+                <p>Small goal donuts for each active goal.</p>
               </div>
-              <div className="goal-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={goalProgress}>
-                <span style={{ width: `${goalProgress}%` }} />
+              <button className="btn btn-secondary btn-inline" type="button" onClick={() => openGoalModal("Savings")}>
+                Manage Goals
+              </button>
+            </div>
+            {goalOverviewSeries.length > 0 ? (
+              <div className="dashboard-goal-grid">
+                {goalOverviewSeries.map((goal) => (
+                  <article key={goal.id} className="list-card dashboard-goal-tile">
+                    <div className="dashboard-goal-donut" style={{ background: goal.gradient }}>
+                      <div className="dashboard-goal-core">{goal.progress}%</div>
+                    </div>
+                    <div>
+                      <strong>{goal.title}</strong>
+                      <p>{money(goal.currentAmount)} / {money(goal.targetAmount)}</p>
+                    </div>
+                  </article>
+                ))}
               </div>
-              <p className="goal-foot">{goalProgress}% complete. Annual tax-free limit: {money(primaryGoal.taxFreeLimit)}.</p>
-            </article>
-          ) : null}
+            ) : (
+              <article className="list-card neutral-item">
+                <p>No goals yet. Add one from Manage Goals.</p>
+              </article>
+            )}
+          </article>
         </div>
 
         <aside className="right-column">
@@ -1707,17 +1754,18 @@ export default function App() {
             <div className="panel-head compact">
               <div>
                 <h4>Cashflow Split</h4>
-                <p>Income versus expense volume this month.</p>
+                <p>Income allocation across expenses, bills, and goals.</p>
               </div>
             </div>
-            <div className="cashflow-bars" role="img" aria-label="Cashflow comparison chart">
+            <div className="cashflow-bars" role="img" aria-label="Cashflow allocation chart">
               {cashflowSeries.map((item) => (
                 <article key={item.id} className="cashflow-bar-card">
                   <p>{item.label}</p>
                   <div className="cashflow-track" aria-hidden>
-                    <span className={item.id === "income" ? "income" : "expense"} style={{ height: `${item.percent}%` }} />
+                    <span className={item.id} style={{ height: `${item.percent}%` }} />
                   </div>
                   <strong>{money(item.amount)}</strong>
+                  <p className="cashflow-sub">{item.allocationPercent}% of income</p>
                 </article>
               ))}
             </div>
@@ -1908,29 +1956,6 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </article>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel goal-snapshot-panel">
-          <div className="panel-head compact">
-            <div>
-              <h4>Goals Snapshot</h4>
-              <p>Progress distribution across all active goals.</p>
-            </div>
-          </div>
-          <div className="goal-snapshot-list">
-            {goalProgressSeries.map((goal) => (
-              <article key={goal.id} className="list-card">
-                <div className="line-item">
-                  <strong>{goal.title}</strong>
-                  <span className="ok-text">{goal.progress}%</span>
-                </div>
-                <div className="meter" aria-hidden>
-                  <span style={{ width: `${goal.progress}%` }} />
-                </div>
-                <p>{money(goal.currentAmount)} / {money(goal.targetAmount)}</p>
               </article>
             ))}
           </div>
@@ -2458,8 +2483,8 @@ export default function App() {
       ) : null}
 
       {quickIncomeModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add income">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Quick add income">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Quick Add Income</h4>
@@ -2505,8 +2530,8 @@ export default function App() {
       ) : null}
 
       {quickExpenseModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add expense">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Quick add expense">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Quick Add Expense</h4>
@@ -2582,8 +2607,8 @@ export default function App() {
       ) : null}
 
       {quickBillModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quick add bill">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Quick add bill">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Quick Add Bill</h4>
@@ -2653,8 +2678,8 @@ export default function App() {
       ) : null}
 
       {billsModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage bills">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Manage bills">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Bills Manager</h4>
@@ -2775,8 +2800,8 @@ export default function App() {
       ) : null}
 
       {expensesModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage expenses">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Manage expenses">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Expenses Manager</h4>
@@ -2901,8 +2926,8 @@ export default function App() {
       ) : null}
 
       {fundsModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage funds">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Manage funds">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Manage Funds</h4>
@@ -2985,8 +3010,8 @@ export default function App() {
       ) : null}
 
       {foodBudgetModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Edit food budget">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Edit food budget">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Edit Food Budget</h4>
@@ -3067,8 +3092,8 @@ export default function App() {
       ) : null}
 
       {contributionModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Add contribution">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Add contribution">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Add Contribution</h4>
@@ -3134,8 +3159,8 @@ export default function App() {
       ) : null}
 
       {goalModalOpen ? (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage goal">
-          <section className="modal-card">
+        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Manage goal">
+          <section className="modal-card app-sheet">
             <div className="panel-head compact">
               <div>
                 <h4>Manage Goal</h4>
