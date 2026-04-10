@@ -51,7 +51,13 @@ const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
 const PROFILE_SETTINGS_KEY = "nesteggs_profile_settings_v1";
 const THEME_MODE_KEY = "nesteggs_theme_mode_v1";
 const SETTINGS_PREFS_KEY = "nesteggs_settings_prefs_v1";
-const APP_VERSION = "v0.1.3";
+const INCOMES_KEY = "nesteggs_incomes_v1";
+const EXPENSES_KEY = "nesteggs_expenses_v1";
+const GOALS_KEY = "nesteggs_goals_v1";
+const BUDGET_LIMITS_KEY = "nesteggs_budget_limits_v1";
+const BILLS_KEY = "nesteggs_bills_v1";
+const CONTRIBUTION_HISTORY_KEY = "nesteggs_contrib_history_v1";
+const APP_VERSION = "v0.1.4";
 const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
 const FCM_TOKEN_KEY = "nesteggs_fcm_token_v1";
@@ -130,6 +136,8 @@ type SettingsPrefs = {
   language: "English (US)" | "English (UK)";
   sharedNotifications: boolean;
   biometricsEnabled: boolean;
+  defaultContributionType: ContributionRecord["contributionType"];
+  defaultContributionRecurrence: ContributionRecord["recurrence"];
 };
 
 type ExpenseDraft = {
@@ -188,7 +196,9 @@ const defaultSettingsPrefs: SettingsPrefs = {
   currency: "ZAR",
   language: "English (US)",
   sharedNotifications: true,
-  biometricsEnabled: true
+  biometricsEnabled: true,
+  defaultContributionType: "Savings",
+  defaultContributionRecurrence: "Monthly"
 };
 const createEmptyQuestProgress = () =>
   Object.fromEntries(questTasks.map((task) => [task.id, false])) as Record<QuestTaskId, boolean>;
@@ -203,6 +213,24 @@ const initialsFromName = (name: string) => {
   if (parts.length === 1) return first.slice(0, 2).toUpperCase();
   const last = parts.at(-1) ?? "";
   return `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
+};
+
+const readArrayFromStorage = <T,>(key: string, fallback: T[]): T[] => {
+  const raw = localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as T[]) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const monthlyContributionFromGoal = (goal: SavingsGoal) => {
+  if (!goal.isRecurring || goal.recurringAmount <= 0) return 0;
+  if (goal.recurrence === "Weekly") return Math.round((goal.recurringAmount * 52) / 12);
+  if (goal.recurrence === "Quarterly") return Math.round(goal.recurringAmount / 3);
+  return goal.recurringAmount;
 };
 
 const createGoalDraft = (
@@ -279,17 +307,22 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [authStatus, setAuthStatus] = useState<string>("Sign in to continue.");
 
-  const [incomes, setIncomes] = useState<IncomeSource[]>(mockIncomes);
-  const [expenses, setExpenses] = useState<ExpenseItem[]>(mockExpenses);
-  const [goals, setGoals] = useState<SavingsGoal[]>(mockGoals);
-  const [budgetLimits, setBudgetLimits] = useState<BudgetCategoryLimit[]>(mockBudgetLimits);
-  const [bills, setBills] = useState<HouseholdBill[]>(initialBills);
+  const [incomes, setIncomes] = useState<IncomeSource[]>(() => readArrayFromStorage(INCOMES_KEY, mockIncomes));
+  const [expenses, setExpenses] = useState<ExpenseItem[]>(() => readArrayFromStorage(EXPENSES_KEY, mockExpenses));
+  const [goals, setGoals] = useState<SavingsGoal[]>(() => readArrayFromStorage(GOALS_KEY, mockGoals));
+  const [budgetLimits, setBudgetLimits] = useState<BudgetCategoryLimit[]>(() =>
+    readArrayFromStorage(BUDGET_LIMITS_KEY, mockBudgetLimits)
+  );
+  const [bills, setBills] = useState<HouseholdBill[]>(() => readArrayFromStorage(BILLS_KEY, initialBills));
 
   const [alertThreshold, setAlertThreshold] = useState(75);
   const [showGoalHistory, setShowGoalHistory] = useState(false);
   const [actionMessage, setActionMessage] = useState<string>("");
   const [actionHistory, setActionHistory] = useState<string[]>([]);
-  const [contributionHistory, setContributionHistory] = useState<ContributionRecord[]>([]);
+  const [contributionHistory, setContributionHistory] = useState<ContributionRecord[]>(() =>
+    readArrayFromStorage(CONTRIBUTION_HISTORY_KEY, [])
+  );
+  const [contributionFilter, setContributionFilter] = useState<"All" | ContributionRecord["contributionType"]>("All");
   const [foodBudgetModalOpen, setFoodBudgetModalOpen] = useState(false);
   const [foodBudgetDraft, setFoodBudgetDraft] = useState("");
   const [foodStoresDraft, setFoodStoresDraft] = useState<FoodStoreDraft[]>([]);
@@ -346,7 +379,16 @@ export default function App() {
         currency: parsed.currency === "USD" || parsed.currency === "EUR" ? parsed.currency : "ZAR",
         language: parsed.language === "English (UK)" ? "English (UK)" : "English (US)",
         sharedNotifications: parsed.sharedNotifications ?? true,
-        biometricsEnabled: parsed.biometricsEnabled ?? true
+        biometricsEnabled: parsed.biometricsEnabled ?? true,
+        defaultContributionType: GOAL_TYPE_ORDER.includes(parsed.defaultContributionType as ContributionRecord["contributionType"])
+          ? (parsed.defaultContributionType as ContributionRecord["contributionType"])
+          : "Savings",
+        defaultContributionRecurrence:
+          parsed.defaultContributionRecurrence === "Weekly" ||
+          parsed.defaultContributionRecurrence === "Quarterly" ||
+          parsed.defaultContributionRecurrence === "Monthly"
+            ? parsed.defaultContributionRecurrence
+            : "Monthly"
       };
     } catch {
       return defaultSettingsPrefs;
@@ -390,6 +432,7 @@ export default function App() {
   });
   const [toast, setToast] = useState<ToastState | null>(null);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [flashGoalIds, setFlashGoalIds] = useState<string[]>([]);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() =>
     typeof Notification !== "undefined" ? Notification.permission : "default"
   );
@@ -520,18 +563,14 @@ export default function App() {
   }, [expenseByCategory]);
 
   const monthlyGoalContribution = useMemo(
-    () =>
-      goals.reduce((sum, goal) => {
-        if (!goal.isRecurring || goal.recurringAmount <= 0) return sum;
-        if (goal.recurrence === "Weekly") return sum + Math.round((goal.recurringAmount * 52) / 12);
-        if (goal.recurrence === "Quarterly") return sum + Math.round(goal.recurringAmount / 3);
-        return sum + goal.recurringAmount;
-      }, 0),
+    () => goals.reduce((sum, goal) => sum + monthlyContributionFromGoal(goal), 0),
     [goals]
   );
+  const monthlyBillsTotal = useMemo(() => bills.reduce((sum, bill) => sum + bill.amount, 0), [bills]);
+  const leftoverAfterAllocations = totals.incomeTotal - totals.expenseTotal - monthlyBillsTotal - monthlyGoalContribution;
 
   const cashflowSeries = useMemo(() => {
-    const billsTotal = bills.reduce((sum, bill) => sum + bill.amount, 0);
+    const billsTotal = monthlyBillsTotal;
     const maxValue = Math.max(totals.incomeTotal, totals.expenseTotal, billsTotal, monthlyGoalContribution, 1);
     const incomeBase = Math.max(1, totals.incomeTotal);
     return [
@@ -564,7 +603,7 @@ export default function App() {
         allocationPercent: Math.round((monthlyGoalContribution / incomeBase) * 100)
       }
     ];
-  }, [bills, monthlyGoalContribution, totals.expenseTotal, totals.incomeTotal]);
+  }, [monthlyBillsTotal, monthlyGoalContribution, totals.expenseTotal, totals.incomeTotal]);
 
   const billStatus = useMemo(() => {
     const paid = bills.filter((bill) => bill.isPaid).length;
@@ -586,6 +625,12 @@ export default function App() {
         progress: Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)),
         currentAmount: goal.currentAmount,
         targetAmount: goal.targetAmount,
+        projectedMonths:
+          goal.currentAmount >= goal.targetAmount
+            ? 0
+            : monthlyContributionFromGoal(goal) > 0
+              ? Math.ceil((goal.targetAmount - goal.currentAmount) / monthlyContributionFromGoal(goal))
+              : null,
         gradient: `conic-gradient(#00464a 0deg ${Math.round(
           Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)) * 3.6
         )}deg, #e0e3e3 ${Math.round(Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100)) * 3.6)}deg 360deg)`
@@ -616,6 +661,14 @@ export default function App() {
     });
   }, [contributionHistory, goals]);
 
+  const filteredContributionHistory = useMemo(
+    () =>
+      contributionFilter === "All"
+        ? contributionHistory
+        : contributionHistory.filter((item) => item.contributionType === contributionFilter),
+    [contributionFilter, contributionHistory]
+  );
+
   const questScore = useMemo(
     () => questTasks.reduce((sum, task) => sum + (questProgress[task.id] ? task.points : 0), 0),
     [questProgress]
@@ -641,6 +694,20 @@ export default function App() {
     contributionModalOpen ||
     settingsOpen;
 
+  const closeTopModal = () => {
+    if (goalModalOpen) return setGoalModalOpen(false);
+    if (contributionModalOpen) return setContributionModalOpen(false);
+    if (foodBudgetModalOpen) return setFoodBudgetModalOpen(false);
+    if (fundsModalOpen) return setFundsModalOpen(false);
+    if (expensesModalOpen) return setExpensesModalOpen(false);
+    if (billsModalOpen) return setBillsModalOpen(false);
+    if (quickBillModalOpen) return setQuickBillModalOpen(false);
+    if (quickExpenseModalOpen) return setQuickExpenseModalOpen(false);
+    if (quickIncomeModalOpen) return setQuickIncomeModalOpen(false);
+    if (quickAddOpen) return setQuickAddOpen(false);
+    if (settingsOpen) return setSettingsOpen(false);
+  };
+
   useEffect(() => {
     localStorage.setItem(QUEST_PROGRESS_KEY, JSON.stringify(questProgress));
   }, [questProgress]);
@@ -661,6 +728,30 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SETTINGS_PREFS_KEY, JSON.stringify(settingsPrefs));
   }, [settingsPrefs]);
+
+  useEffect(() => {
+    localStorage.setItem(INCOMES_KEY, JSON.stringify(incomes));
+  }, [incomes]);
+
+  useEffect(() => {
+    localStorage.setItem(EXPENSES_KEY, JSON.stringify(expenses));
+  }, [expenses]);
+
+  useEffect(() => {
+    localStorage.setItem(GOALS_KEY, JSON.stringify(goals));
+  }, [goals]);
+
+  useEffect(() => {
+    localStorage.setItem(BUDGET_LIMITS_KEY, JSON.stringify(budgetLimits));
+  }, [budgetLimits]);
+
+  useEffect(() => {
+    localStorage.setItem(BILLS_KEY, JSON.stringify(bills));
+  }, [bills]);
+
+  useEffect(() => {
+    localStorage.setItem(CONTRIBUTION_HISTORY_KEY, JSON.stringify(contributionHistory));
+  }, [contributionHistory]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -715,6 +806,12 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
+    if (flashGoalIds.length === 0) return;
+    const timer = window.setTimeout(() => setFlashGoalIds([]), 1400);
+    return () => window.clearTimeout(timer);
+  }, [flashGoalIds]);
+
+  useEffect(() => {
     const originalOverflow = document.body.style.overflow;
     if (anyModalOpen) {
       document.body.style.overflow = "hidden";
@@ -725,6 +822,57 @@ export default function App() {
       document.body.style.overflow = originalOverflow;
     };
   }, [anyModalOpen]);
+
+  useEffect(() => {
+    if (!anyModalOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeTopModal();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const modals = Array.from(document.querySelectorAll<HTMLElement>(".modal-backdrop[role='dialog']"));
+      const activeModal = modals.at(-1);
+      if (!activeModal) return;
+      const focusables = Array.from(
+        activeModal.querySelectorAll<HTMLElement>(
+          "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+        )
+      ).filter((el) => !el.hasAttribute("disabled"));
+      if (focusables.length === 0) return;
+      const first = focusables.at(0);
+      const last = focusables.at(-1);
+      if (!first || !last) return;
+      const current = document.activeElement as HTMLElement | null;
+      if (event.shiftKey) {
+        if (!current || current === first) {
+          event.preventDefault();
+          last.focus();
+        }
+        return;
+      }
+      if (!current || current === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    anyModalOpen,
+    billsModalOpen,
+    contributionModalOpen,
+    expensesModalOpen,
+    foodBudgetModalOpen,
+    fundsModalOpen,
+    goalModalOpen,
+    quickAddOpen,
+    quickBillModalOpen,
+    quickExpenseModalOpen,
+    quickIncomeModalOpen,
+    settingsOpen
+  ]);
 
   useEffect(() => {
     return () => {
@@ -924,9 +1072,9 @@ export default function App() {
 
   const openContributionModal = () => {
     setContributionAmountDraft("");
-    setContributionTypeDraft("Savings");
+    setContributionTypeDraft(settingsPrefs.defaultContributionType);
     setContributionRecurringDraft(false);
-    setContributionFrequencyDraft("Monthly");
+    setContributionFrequencyDraft(settingsPrefs.defaultContributionRecurrence);
     setContributionModalOpen(true);
   };
 
@@ -971,10 +1119,23 @@ export default function App() {
     const normalizedTarget = Math.round(targetAmount);
     const normalizedCurrent = Math.min(Math.round(currentAmount), normalizedTarget);
     const normalizedRecurring = goalDraft.isRecurring ? Math.round(recurringAmount) : 0;
+    const previousGoals = [...goals];
+    const existingGoal = goals.find((goal) => goal.goalType === goalDraft.goalType);
+    const majorEdit =
+      Boolean(existingGoal) &&
+      (existingGoal?.targetAmount !== normalizedTarget || existingGoal?.currentAmount !== normalizedCurrent);
+    if (majorEdit) {
+      const ok = window.confirm("This will overwrite target/current amounts for this goal. Continue?");
+      if (!ok) return;
+    }
 
+    let updatedGoalId = "";
     setGoals((prev) => {
       const existingIndex = prev.findIndex((goal) => goal.goalType === goalDraft.goalType);
       if (existingIndex >= 0) {
+        const matchedGoal = prev[existingIndex];
+        if (!matchedGoal) return prev;
+        updatedGoalId = matchedGoal.id;
         return prev.map((goal, idx) =>
           idx === existingIndex
             ? {
@@ -994,7 +1155,11 @@ export default function App() {
       return [
         ...prev,
         {
-          id: `goal-${goalDraft.goalType.toLowerCase()}-${Date.now()}`,
+          id: (() => {
+            const newId = `goal-${goalDraft.goalType.toLowerCase()}-${Date.now()}`;
+            updatedGoalId = newId;
+            return newId;
+          })(),
           goalType: goalDraft.goalType,
           title: trimmedTitle,
           targetAmount: normalizedTarget,
@@ -1006,8 +1171,14 @@ export default function App() {
         }
       ];
     });
+    queueUndo("Goal settings saved", () => {
+      setGoals(previousGoals);
+      showToast("info", "Goal update reverted.");
+      addHistory(`Undo: restored ${goalDraft.goalType.toLowerCase()} goal.`);
+    });
 
     setGoalModalOpen(false);
+    setFlashGoalIds((prev) => [...new Set([...prev, updatedGoalId])]);
     addHistory(`Updated ${goalDraft.goalType.toLowerCase()} goal settings.`);
     showToast("success", `${GOAL_TYPE_LABELS[goalDraft.goalType]} goal updated.`);
   };
@@ -1061,6 +1232,55 @@ export default function App() {
       terms: "https://firebase.google.com/terms"
     };
     window.open(urls[section], "_blank", "noopener,noreferrer");
+  };
+
+  const exportCsv = (filename: string, headers: string[], rows: Array<Array<string | number | boolean>>) => {
+    const escapeCell = (value: string | number | boolean) => {
+      const cell = String(value ?? "");
+      return /[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell;
+    };
+    const csv = [headers.map(escapeCell).join(","), ...rows.map((row) => row.map(escapeCell).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllData = () => {
+    exportCsv(
+      "nesteggs-incomes.csv",
+      ["id", "name", "type", "amount", "month"],
+      incomes.map((row) => [row.id, row.name, row.type, row.amount, row.month])
+    );
+    exportCsv(
+      "nesteggs-expenses.csv",
+      ["id", "category", "subcategory", "amount", "month", "dueDate", "isRecurring", "isPaid"],
+      expenses.map((row) => [
+        row.id,
+        row.category,
+        row.subcategory,
+        row.amount,
+        row.month,
+        row.dueDate ?? "",
+        Boolean(row.isRecurring),
+        Boolean(row.isPaid)
+      ])
+    );
+    exportCsv(
+      "nesteggs-bills.csv",
+      ["id", "title", "category", "dueDate", "amount", "owner", "isPaid", "paidBy"],
+      bills.map((row) => [row.id, row.title, row.category, row.dueDate, row.amount, row.owner, row.isPaid, row.paidBy ?? ""])
+    );
+    exportCsv(
+      "nesteggs-contributions.csv",
+      ["id", "createdAt", "amount", "contributionType", "isRecurring", "recurrence"],
+      contributionHistory.map((row) => [row.id, row.createdAt, row.amount, row.contributionType, row.isRecurring, row.recurrence])
+    );
+    showToast("success", "CSV exports downloaded.");
+    addHistory("Exported incomes, expenses, bills, and contributions as CSV.");
   };
 
   const signOutFromSettings = () => {
@@ -1204,12 +1424,16 @@ export default function App() {
       return;
     }
 
+    let updatedGoalId = "";
     setGoals((prev) => {
       const contribution = Math.round(amount);
       const targetType = contributionTypeDraft;
       const existingIndex = prev.findIndex((goal) => goal.goalType === targetType);
 
       if (existingIndex >= 0) {
+        const matchedGoal = prev[existingIndex];
+        if (!matchedGoal) return prev;
+        updatedGoalId = matchedGoal.id;
         return prev.map((goal, idx) =>
           idx === existingIndex
             ? {
@@ -1227,7 +1451,11 @@ export default function App() {
       return [
         ...prev,
         {
-          id: `goal-${targetType.toLowerCase()}-${Date.now()}`,
+          id: (() => {
+            const newId = `goal-${targetType.toLowerCase()}-${Date.now()}`;
+            updatedGoalId = newId;
+            return newId;
+          })(),
           goalType: targetType,
           title: fallback.title,
           targetAmount: fallback.target,
@@ -1257,6 +1485,7 @@ export default function App() {
     ]);
 
     setContributionModalOpen(false);
+    setFlashGoalIds((prev) => [...new Set([...prev, updatedGoalId])]);
     markQuest("add_contribution");
     addHistory(
       `Added ${money(amount)} as ${contributionTypeDraft.toLowerCase()} contribution${contributionRecurringDraft ? ` (${contributionFrequencyDraft.toLowerCase()} recurring)` : ""}.`
@@ -1610,6 +1839,10 @@ export default function App() {
           <p className="kpi-label">Budget Variance</p>
           <p className={`kpi-value ${totals.budgetVariance >= 0 ? "good" : "warn"}`}>{money(totals.budgetVariance)}</p>
         </article>
+        <article className="kpi-card">
+          <p className="kpi-label">Leftover After Allocations</p>
+          <p className={`kpi-value ${leftoverAfterAllocations >= 0 ? "good" : "warn"}`}>{money(leftoverAfterAllocations)}</p>
+        </article>
       </section>
 
       <section className="editorial-grid">
@@ -1653,13 +1886,20 @@ export default function App() {
             {goalOverviewSeries.length > 0 ? (
               <div className="dashboard-goal-grid">
                 {goalOverviewSeries.map((goal) => (
-                  <article key={goal.id} className="list-card dashboard-goal-tile">
+                  <article key={goal.id} className={`list-card dashboard-goal-tile ${flashGoalIds.includes(goal.id) ? "flash-card" : ""}`}>
                     <div className="dashboard-goal-donut" style={{ background: goal.gradient }}>
                       <div className="dashboard-goal-core">{goal.progress}%</div>
                     </div>
                     <div>
                       <strong>{goal.title}</strong>
                       <p>{money(goal.currentAmount)} / {money(goal.targetAmount)}</p>
+                      <p>
+                        {goal.projectedMonths === null
+                          ? "Add recurring amount for projection"
+                          : goal.projectedMonths === 0
+                            ? "Target reached"
+                            : `Est. ${goal.projectedMonths} month${goal.projectedMonths === 1 ? "" : "s"} remaining`}
+                      </p>
                     </div>
                   </article>
                 ))}
@@ -1975,8 +2215,15 @@ export default function App() {
                 {sectionGoals.length > 0 ? (
                   sectionGoals.map((goal) => {
                     const progress = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100));
+                    const monthlyContribution = monthlyContributionFromGoal(goal);
+                    const projectedMonths =
+                      goal.currentAmount >= goal.targetAmount
+                        ? 0
+                        : monthlyContribution > 0
+                          ? Math.ceil((goal.targetAmount - goal.currentAmount) / monthlyContribution)
+                          : null;
                     return (
-                      <article key={goal.id} className="list-card goal-card-large">
+                      <article key={goal.id} className={`list-card goal-card-large ${flashGoalIds.includes(goal.id) ? "flash-card" : ""}`}>
                         <div className="goal-head">
                           <div>
                             <p className="eyebrow">{GOAL_TYPE_EYEBROW[goalType]}</p>
@@ -1991,6 +2238,13 @@ export default function App() {
                         {goal.isRecurring ? (
                           <p className="goal-foot">Recurring: {money(goal.recurringAmount)} · {goal.recurrence}</p>
                         ) : null}
+                        <p className="goal-foot">
+                          {projectedMonths === null
+                            ? "No monthly projection (set recurring contribution)."
+                            : projectedMonths === 0
+                              ? "Target reached."
+                              : `Projected in ~${projectedMonths} month${projectedMonths === 1 ? "" : "s"}.`}
+                        </p>
                         <div className="button-row">
                           <button className="btn btn-secondary" type="button" onClick={() => openGoalModal(goalType)}>Edit Goal</button>
                         </div>
@@ -2022,10 +2276,23 @@ export default function App() {
               <p>{showGoalHistory ? "Logged contribution records" : "Latest goal contributions across all types."}</p>
             </div>
           </div>
+          <div className="status-strip">
+            <button className={`btn btn-inline ${contributionFilter === "All" ? "btn-secondary" : "btn-ghost"}`} type="button" onClick={() => setContributionFilter("All")}>All</button>
+            {GOAL_TYPE_ORDER.map((type) => (
+              <button
+                key={type}
+                className={`btn btn-inline ${contributionFilter === type ? "btn-secondary" : "btn-ghost"}`}
+                type="button"
+                onClick={() => setContributionFilter(type)}
+              >
+                {GOAL_TYPE_LABELS[type]}
+              </button>
+            ))}
+          </div>
           <div className="stack-list">
             {showGoalHistory ? (
-              contributionHistory.length > 0 ? (
-                contributionHistory.map((item) => (
+              filteredContributionHistory.length > 0 ? (
+                filteredContributionHistory.map((item) => (
                   <article key={item.id} className="list-card activity-item">
                     <div>
                       <strong>{item.contributionType}</strong>
@@ -2043,8 +2310,8 @@ export default function App() {
                 </article>
               )
             ) : (
-              contributionHistory.length > 0 ? (
-                contributionHistory
+              filteredContributionHistory.length > 0 ? (
+                filteredContributionHistory
                   .slice(0, 6)
                   .map((item) => (
                     <article key={item.id} className="list-card activity-item">
@@ -2261,6 +2528,54 @@ export default function App() {
                       <option value="English (UK)">English (UK)</option>
                     </select>
                   </article>
+
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>flag</span>
+                      <div>
+                        <strong>Default Contribution Type</strong>
+                        <p>{GOAL_TYPE_LABELS[settingsPrefsDraft.defaultContributionType]}</p>
+                      </div>
+                    </div>
+                    <select
+                      className="settings-inline-select"
+                      value={settingsPrefsDraft.defaultContributionType}
+                      onChange={(e) =>
+                        setSettingsPrefsDraft((prev) => ({
+                          ...prev,
+                          defaultContributionType: e.target.value as ContributionRecord["contributionType"]
+                        }))
+                      }
+                    >
+                      {GOAL_TYPE_ORDER.map((type) => (
+                        <option key={type} value={type}>{GOAL_TYPE_LABELS[type]}</option>
+                      ))}
+                    </select>
+                  </article>
+
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>schedule</span>
+                      <div>
+                        <strong>Default Recurrence</strong>
+                        <p>{settingsPrefsDraft.defaultContributionRecurrence}</p>
+                      </div>
+                    </div>
+                    <select
+                      className="settings-inline-select"
+                      value={settingsPrefsDraft.defaultContributionRecurrence}
+                      onChange={(e) =>
+                        setSettingsPrefsDraft((prev) => ({
+                          ...prev,
+                          defaultContributionRecurrence: e.target.value as ContributionRecord["recurrence"]
+                        }))
+                      }
+                    >
+                      <option value="Weekly">Weekly</option>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Quarterly">Quarterly</option>
+                    </select>
+                  </article>
                 </div>
               </section>
 
@@ -2411,6 +2726,7 @@ export default function App() {
                   <button className="btn btn-ghost" type="button" onClick={() => void sendTestAlert()}>Send Test Alert</button>
                   <button className="btn btn-secondary" type="button" onClick={resetNavigationQuest}>Reset Onboarding Quest</button>
                   <button className="btn btn-ghost" type="button" onClick={clearActivityHistory}>Clear Activity Log</button>
+                  <button className="btn btn-secondary" type="button" onClick={exportAllData}>Export All CSV</button>
                 </div>
               </section>
 
@@ -2499,6 +2815,7 @@ export default function App() {
                   onChange={(e) => setQuickIncomeDraft((prev) => ({ ...prev, name: e.target.value }))}
                   placeholder="Salary"
                 />
+                {quickIncomeDraft.name.trim().length === 0 ? <p className="warn-text">Name is required.</p> : null}
               </label>
               <label>
                 Income Type
@@ -2519,6 +2836,9 @@ export default function App() {
                   onChange={(e) => setQuickIncomeDraft((prev) => ({ ...prev, amount: e.target.value }))}
                   placeholder="25000"
                 />
+                {quickIncomeDraft.amount && (!Number.isFinite(normalizeNumber(quickIncomeDraft.amount)) || normalizeNumber(quickIncomeDraft.amount) <= 0) ? (
+                  <p className="warn-text">Enter a valid amount.</p>
+                ) : null}
               </label>
             </div>
             <div className="button-row">
@@ -2546,6 +2866,7 @@ export default function App() {
                   onChange={(e) => setExpenseDraft((prev) => ({ ...prev, category: e.target.value }))}
                   placeholder="Housing"
                 />
+                {expenseDraft.category.trim().length === 0 ? <p className="warn-text">Category is required.</p> : null}
               </label>
               <label>
                 Subcategory
@@ -2554,6 +2875,7 @@ export default function App() {
                   onChange={(e) => setExpenseDraft((prev) => ({ ...prev, subcategory: e.target.value }))}
                   placeholder="Rent"
                 />
+                {expenseDraft.subcategory.trim().length === 0 ? <p className="warn-text">Subcategory is required.</p> : null}
               </label>
               <label>
                 Amount
@@ -2564,6 +2886,9 @@ export default function App() {
                   onChange={(e) => setExpenseDraft((prev) => ({ ...prev, amount: e.target.value }))}
                   placeholder="12000"
                 />
+                {expenseDraft.amount && (!Number.isFinite(normalizeNumber(expenseDraft.amount)) || normalizeNumber(expenseDraft.amount) <= 0) ? (
+                  <p className="warn-text">Enter a valid amount.</p>
+                ) : null}
               </label>
               <label>
                 Month (YYYY-MM)
@@ -2623,6 +2948,7 @@ export default function App() {
                   onChange={(e) => setBillDraft((prev) => ({ ...prev, title: e.target.value }))}
                   placeholder="Internet"
                 />
+                {billDraft.title.trim().length === 0 ? <p className="warn-text">Title is required.</p> : null}
               </label>
               <label>
                 Category
@@ -2641,6 +2967,9 @@ export default function App() {
                   onChange={(e) => setBillDraft((prev) => ({ ...prev, amount: e.target.value }))}
                   placeholder="899"
                 />
+                {billDraft.amount && (!Number.isFinite(normalizeNumber(billDraft.amount)) || normalizeNumber(billDraft.amount) <= 0) ? (
+                  <p className="warn-text">Enter a valid amount.</p>
+                ) : null}
               </label>
               <label>
                 Due Date
@@ -3111,6 +3440,9 @@ export default function App() {
                   onChange={(e) => setContributionAmountDraft(e.target.value)}
                   placeholder="500"
                 />
+                {contributionAmountDraft && (!Number.isFinite(normalizeNumber(contributionAmountDraft)) || normalizeNumber(contributionAmountDraft) <= 0) ? (
+                  <p className="warn-text">Enter a valid contribution amount.</p>
+                ) : null}
               </label>
 
               <label>
@@ -3200,6 +3532,9 @@ export default function App() {
                   onChange={(e) => setGoalDraft((prev) => ({ ...prev, targetAmount: e.target.value }))}
                   placeholder="50000"
                 />
+                {goalDraft.targetAmount && (!Number.isFinite(normalizeNumber(goalDraft.targetAmount)) || normalizeNumber(goalDraft.targetAmount) <= 0) ? (
+                  <p className="warn-text">Enter a valid target amount.</p>
+                ) : null}
               </label>
 
               <label>
@@ -3211,6 +3546,9 @@ export default function App() {
                   onChange={(e) => setGoalDraft((prev) => ({ ...prev, currentAmount: e.target.value }))}
                   placeholder="10000"
                 />
+                {goalDraft.currentAmount && (!Number.isFinite(normalizeNumber(goalDraft.currentAmount)) || normalizeNumber(goalDraft.currentAmount) < 0) ? (
+                  <p className="warn-text">Enter a valid existing amount.</p>
+                ) : null}
               </label>
 
               <label className="inline-check">
@@ -3233,6 +3571,9 @@ export default function App() {
                       onChange={(e) => setGoalDraft((prev) => ({ ...prev, recurringAmount: e.target.value }))}
                       placeholder="1500"
                     />
+                    {goalDraft.recurringAmount && (!Number.isFinite(normalizeNumber(goalDraft.recurringAmount)) || normalizeNumber(goalDraft.recurringAmount) <= 0) ? (
+                      <p className="warn-text">Enter a valid recurring amount.</p>
+                    ) : null}
                   </label>
                   <label>
                     Recurrence
