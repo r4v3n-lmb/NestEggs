@@ -32,7 +32,10 @@ export const mockGoals: SavingsGoal[] = [
     title: "Tax-Free Savings",
     targetAmount: 36000,
     currentAmount: 18300,
-    taxFreeLimit: 36000
+    taxFreeLimit: 36000,
+    isRecurring: true,
+    recurringAmount: 2500,
+    recurrence: "Monthly"
   },
   {
     id: "g-2",
@@ -40,6 +43,9 @@ export const mockGoals: SavingsGoal[] = [
     title: "Investment Portfolio",
     targetAmount: 120000,
     currentAmount: 27500,
-    taxFreeLimit: 120000
+    taxFreeLimit: 120000,
+    isRecurring: true,
+    recurringAmount: 3500,
+    recurrence: "Monthly"
   }
 ];

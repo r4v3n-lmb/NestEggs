@@ -51,18 +51,34 @@ const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
 const PROFILE_SETTINGS_KEY = "nesteggs_profile_settings_v1";
 const THEME_MODE_KEY = "nesteggs_theme_mode_v1";
 const SETTINGS_PREFS_KEY = "nesteggs_settings_prefs_v1";
-const APP_VERSION = "v0.1.1";
+const APP_VERSION = "v0.1.2";
 const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
 const FCM_TOKEN_KEY = "nesteggs_fcm_token_v1";
-const GOAL_TYPE_ORDER: ContributionRecord["contributionType"][] = ["Savings", "Investment"];
+const GOAL_TYPE_ORDER: ContributionRecord["contributionType"][] = ["Savings", "Investment", "Retirement", "Emergency"];
 const GOAL_TYPE_LABELS: Record<ContributionRecord["contributionType"], string> = {
   Savings: "Savings",
-  Investment: "Investments"
+  Investment: "Investments",
+  Retirement: "Retirement",
+  Emergency: "Emergency"
+};
+const GOAL_TYPE_DESCRIPTIONS: Record<ContributionRecord["contributionType"], string> = {
+  Savings: "Cash and reserve targets.",
+  Investment: "Growth and portfolio targets.",
+  Retirement: "Long-term retirement planning.",
+  Emergency: "Short-term safety net planning."
+};
+const GOAL_TYPE_EYEBROW: Record<ContributionRecord["contributionType"], string> = {
+  Savings: "Savings Goal",
+  Investment: "Investment Goal",
+  Retirement: "Retirement Goal",
+  Emergency: "Emergency Goal"
 };
 const GOAL_DEFAULTS: Record<ContributionRecord["contributionType"], { title: string; target: number }> = {
   Savings: { title: "Savings Goal", target: 36000 },
-  Investment: { title: "Investment Goal", target: 120000 }
+  Investment: { title: "Investment Goal", target: 120000 },
+  Retirement: { title: "Retirement Goal", target: 500000 },
+  Emergency: { title: "Emergency Fund", target: 50000 }
 };
 
 type FoodStoreDraft = {
@@ -86,9 +102,19 @@ type ContributionRecord = {
   id: string;
   createdAt: string;
   amount: number;
-  contributionType: "Savings" | "Investment";
+  contributionType: "Savings" | "Investment" | "Retirement" | "Emergency";
   isRecurring: boolean;
   recurrence: "Weekly" | "Monthly" | "Quarterly";
+};
+
+type GoalDraft = {
+  goalType: ContributionRecord["contributionType"];
+  title: string;
+  targetAmount: string;
+  currentAmount: string;
+  isRecurring: boolean;
+  recurringAmount: string;
+  recurrence: ContributionRecord["recurrence"];
 };
 
 type ThemeMode = "light" | "dark";
@@ -179,6 +205,33 @@ const initialsFromName = (name: string) => {
   return `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
 };
 
+const createGoalDraft = (
+  goalType: ContributionRecord["contributionType"],
+  existing?: SavingsGoal
+): GoalDraft => {
+  if (existing) {
+    return {
+      goalType,
+      title: existing.title,
+      targetAmount: String(existing.targetAmount),
+      currentAmount: String(existing.currentAmount),
+      isRecurring: existing.isRecurring,
+      recurringAmount: String(existing.recurringAmount || ""),
+      recurrence: existing.recurrence
+    };
+  }
+  const fallback = GOAL_DEFAULTS[goalType];
+  return {
+    goalType,
+    title: fallback.title,
+    targetAmount: String(fallback.target),
+    currentAmount: "",
+    isRecurring: false,
+    recurringAmount: "",
+    recurrence: "Monthly"
+  };
+};
+
 const initialBills: HouseholdBill[] = [
   {
     id: "bill-1",
@@ -261,6 +314,8 @@ export default function App() {
   const [contributionRecurringDraft, setContributionRecurringDraft] = useState(false);
   const [contributionFrequencyDraft, setContributionFrequencyDraft] =
     useState<ContributionRecord["recurrence"]>("Monthly");
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const [goalDraft, setGoalDraft] = useState<GoalDraft>(() => createGoalDraft("Savings"));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     const raw = localStorage.getItem(THEME_MODE_KEY);
@@ -551,6 +606,7 @@ export default function App() {
     expensesModalOpen ||
     fundsModalOpen ||
     foodBudgetModalOpen ||
+    goalModalOpen ||
     contributionModalOpen ||
     settingsOpen;
 
@@ -842,6 +898,88 @@ export default function App() {
     setContributionModalOpen(true);
   };
 
+  const openGoalModal = (goalType: ContributionRecord["contributionType"] = "Savings") => {
+    const existing = goals.find((goal) => goal.goalType === goalType);
+    setGoalDraft(createGoalDraft(goalType, existing));
+    setGoalModalOpen(true);
+  };
+
+  const handleGoalTypeChange = (nextType: ContributionRecord["contributionType"]) => {
+    const existing = goals.find((goal) => goal.goalType === nextType);
+    setGoalDraft(createGoalDraft(nextType, existing));
+  };
+
+  const saveGoalModal = () => {
+    const targetAmount = normalizeNumber(goalDraft.targetAmount);
+    const currentAmount = normalizeNumber(goalDraft.currentAmount || "0");
+    const recurringAmount = normalizeNumber(goalDraft.recurringAmount || "0");
+    const trimmedTitle = goalDraft.title.trim();
+
+    if (!trimmedTitle) {
+      showToast("error", "Enter a goal title.");
+      addHistory("Goal update failed: missing title.");
+      return;
+    }
+    if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
+      showToast("error", "Enter a valid goal amount.");
+      addHistory("Goal update failed: invalid target amount.");
+      return;
+    }
+    if (!Number.isFinite(currentAmount) || currentAmount < 0) {
+      showToast("error", "Enter a valid existing amount.");
+      addHistory("Goal update failed: invalid existing amount.");
+      return;
+    }
+    if (goalDraft.isRecurring && (!Number.isFinite(recurringAmount) || recurringAmount <= 0)) {
+      showToast("error", "Enter a recurring contribution amount.");
+      addHistory("Goal update failed: invalid recurring contribution.");
+      return;
+    }
+
+    const normalizedTarget = Math.round(targetAmount);
+    const normalizedCurrent = Math.min(Math.round(currentAmount), normalizedTarget);
+    const normalizedRecurring = goalDraft.isRecurring ? Math.round(recurringAmount) : 0;
+
+    setGoals((prev) => {
+      const existingIndex = prev.findIndex((goal) => goal.goalType === goalDraft.goalType);
+      if (existingIndex >= 0) {
+        return prev.map((goal, idx) =>
+          idx === existingIndex
+            ? {
+                ...goal,
+                title: trimmedTitle,
+                targetAmount: normalizedTarget,
+                currentAmount: normalizedCurrent,
+                taxFreeLimit: normalizedTarget,
+                isRecurring: goalDraft.isRecurring,
+                recurringAmount: normalizedRecurring,
+                recurrence: goalDraft.recurrence
+              }
+            : goal
+        );
+      }
+
+      return [
+        ...prev,
+        {
+          id: `goal-${goalDraft.goalType.toLowerCase()}-${Date.now()}`,
+          goalType: goalDraft.goalType,
+          title: trimmedTitle,
+          targetAmount: normalizedTarget,
+          currentAmount: normalizedCurrent,
+          taxFreeLimit: normalizedTarget,
+          isRecurring: goalDraft.isRecurring,
+          recurringAmount: normalizedRecurring,
+          recurrence: goalDraft.recurrence
+        }
+      ];
+    });
+
+    setGoalModalOpen(false);
+    addHistory(`Updated ${goalDraft.goalType.toLowerCase()} goal settings.`);
+    showToast("success", `${GOAL_TYPE_LABELS[goalDraft.goalType]} goal updated.`);
+  };
+
   const openSettingsModal = () => {
     setProfileDraft(profileSettings);
     setAlertThresholdDraft(alertThreshold);
@@ -1044,7 +1182,10 @@ export default function App() {
           idx === existingIndex
             ? {
                 ...goal,
-                currentAmount: Math.min(goal.currentAmount + contribution, goal.targetAmount)
+                currentAmount: Math.min(goal.currentAmount + contribution, goal.targetAmount),
+                isRecurring: contributionRecurringDraft ? true : goal.isRecurring,
+                recurringAmount: contributionRecurringDraft ? contribution : goal.recurringAmount,
+                recurrence: contributionRecurringDraft ? contributionFrequencyDraft : goal.recurrence
               }
             : goal
         );
@@ -1059,7 +1200,10 @@ export default function App() {
           title: fallback.title,
           targetAmount: fallback.target,
           currentAmount: Math.min(contribution, fallback.target),
-          taxFreeLimit: fallback.target
+          taxFreeLimit: fallback.target,
+          isRecurring: contributionRecurringDraft,
+          recurringAmount: contributionRecurringDraft ? contribution : 0,
+          recurrence: contributionFrequencyDraft
         }
       ];
     });
@@ -1318,7 +1462,7 @@ export default function App() {
     }
     setActiveTab("goals");
     openContributionModal();
-    addHistory("Quick add: opened Savings/Investment contribution.");
+    addHistory("Quick add: opened goal contribution.");
   };
 
   const handleFab = () => {
@@ -1799,7 +1943,7 @@ export default function App() {
               <div className="panel-head compact">
                 <div>
                   <h4>{GOAL_TYPE_LABELS[goalType]}</h4>
-                  <p>{goalType === "Savings" ? "Cash and reserve targets." : "Growth and portfolio targets."}</p>
+                  <p>{GOAL_TYPE_DESCRIPTIONS[goalType]}</p>
                 </div>
               </div>
               <div className="stack-list">
@@ -1810,7 +1954,7 @@ export default function App() {
                       <article key={goal.id} className="list-card goal-card-large">
                         <div className="goal-head">
                           <div>
-                            <p className="eyebrow">{goalType === "Savings" ? "Savings Goal" : "Investment Goal"}</p>
+                            <p className="eyebrow">{GOAL_TYPE_EYEBROW[goalType]}</p>
                             <h4>{goal.title}</h4>
                           </div>
                           <p className="goal-amount">{money(goal.currentAmount)} / {money(goal.targetAmount)}</p>
@@ -1819,6 +1963,12 @@ export default function App() {
                           <span style={{ width: `${progress}%` }} />
                         </div>
                         <p className="goal-foot">{progress}% complete</p>
+                        {goal.isRecurring ? (
+                          <p className="goal-foot">Recurring: {money(goal.recurringAmount)} · {goal.recurrence}</p>
+                        ) : null}
+                        <div className="button-row">
+                          <button className="btn btn-secondary" type="button" onClick={() => openGoalModal(goalType)}>Edit Goal</button>
+                        </div>
                       </article>
                     );
                   })
@@ -1834,6 +1984,7 @@ export default function App() {
 
         <article className="panel goal-actions-panel">
           <div className="button-row">
+            <button className="btn btn-secondary" type="button" onClick={() => openGoalModal("Savings")}>Manage Goals</button>
             <button className="btn btn-primary" type="button" onClick={openContributionModal}>Add Contribution</button>
             <button className="btn btn-secondary" type="button" onClick={handleViewHistory}>View History</button>
           </div>
@@ -2945,6 +3096,8 @@ export default function App() {
                 >
                   <option value="Savings">Savings</option>
                   <option value="Investment">Investment</option>
+                  <option value="Retirement">Retirement</option>
+                  <option value="Emergency">Emergency</option>
                 </select>
               </label>
 
@@ -2975,6 +3128,105 @@ export default function App() {
             <div className="button-row">
               <button className="btn btn-primary" type="button" onClick={saveContributionModal}>Add</button>
               <button className="btn btn-ghost" type="button" onClick={() => setContributionModalOpen(false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {goalModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage goal">
+          <section className="modal-card">
+            <div className="panel-head compact">
+              <div>
+                <h4>Manage Goal</h4>
+                <p>Edit goal amount, existing balance, and recurring contribution settings.</p>
+              </div>
+            </div>
+
+            <div className="modal-grid">
+              <label>
+                Goal Type
+                <select
+                  value={goalDraft.goalType}
+                  onChange={(e) => handleGoalTypeChange(e.target.value as ContributionRecord["contributionType"])}
+                >
+                  <option value="Savings">Savings</option>
+                  <option value="Investment">Investment</option>
+                  <option value="Retirement">Retirement</option>
+                  <option value="Emergency">Emergency</option>
+                </select>
+              </label>
+
+              <label>
+                Goal Title
+                <input
+                  value={goalDraft.title}
+                  onChange={(e) => setGoalDraft((prev) => ({ ...prev, title: e.target.value }))}
+                  placeholder="Goal title"
+                />
+              </label>
+
+              <label>
+                Goal Amount
+                <input
+                  type="number"
+                  min={1}
+                  value={goalDraft.targetAmount}
+                  onChange={(e) => setGoalDraft((prev) => ({ ...prev, targetAmount: e.target.value }))}
+                  placeholder="50000"
+                />
+              </label>
+
+              <label>
+                Existing Amount
+                <input
+                  type="number"
+                  min={0}
+                  value={goalDraft.currentAmount}
+                  onChange={(e) => setGoalDraft((prev) => ({ ...prev, currentAmount: e.target.value }))}
+                  placeholder="10000"
+                />
+              </label>
+
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={goalDraft.isRecurring}
+                  onChange={(e) => setGoalDraft((prev) => ({ ...prev, isRecurring: e.target.checked }))}
+                />
+                Recurring Contribution
+              </label>
+
+              {goalDraft.isRecurring ? (
+                <>
+                  <label>
+                    Recurring Amount
+                    <input
+                      type="number"
+                      min={1}
+                      value={goalDraft.recurringAmount}
+                      onChange={(e) => setGoalDraft((prev) => ({ ...prev, recurringAmount: e.target.value }))}
+                      placeholder="1500"
+                    />
+                  </label>
+                  <label>
+                    Recurrence
+                    <select
+                      value={goalDraft.recurrence}
+                      onChange={(e) => setGoalDraft((prev) => ({ ...prev, recurrence: e.target.value as ContributionRecord["recurrence"] }))}
+                    >
+                      <option value="Weekly">Weekly</option>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Quarterly">Quarterly</option>
+                    </select>
+                  </label>
+                </>
+              ) : null}
+            </div>
+
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={saveGoalModal}>Save Goal</button>
+              <button className="btn btn-ghost" type="button" onClick={() => setGoalModalOpen(false)}>Cancel</button>
             </div>
           </section>
         </div>

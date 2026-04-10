@@ -27,11 +27,14 @@ export type BudgetCategoryLimit = {
 
 export type SavingsGoal = {
   id: string;
-  goalType: "Savings" | "Investment";
+  goalType: "Savings" | "Investment" | "Retirement" | "Emergency";
   title: string;
   targetAmount: number;
   currentAmount: number;
   taxFreeLimit: number;
+  isRecurring: boolean;
+  recurringAmount: number;
+  recurrence: "Weekly" | "Monthly" | "Quarterly";
 };
 
 export type Household = {
