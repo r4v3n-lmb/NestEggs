@@ -372,6 +372,7 @@ button {
 
 .contribution-filter-row {
   justify-content: flex-end;
+  align-items: end;
 }
 
 .contribution-filter-field {
@@ -383,7 +384,9 @@ button {
 }
 
 .contribution-filter-field select {
-  min-width: 11rem;
+  min-width: 10.5rem;
+  background: var(--surface-lowest);
+  border: 1px solid var(--surface-highest);
 }
 
 .status-pill {
@@ -1222,6 +1225,13 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+  background: var(--surface-low);
+  border-radius: 1rem;
+  padding: 0.35rem;
+}
+
+.settings-tabs .btn {
+  border-radius: 0.75rem;
 }
 
 .settings-profile-hero {
@@ -1489,7 +1499,11 @@ select {
 }
 
 .manager-modal {
-  width: min(960px, 100%);
+  width: min(900px, 100%);
+}
+
+.manager-modal > .panel-head.compact {
+  margin-bottom: 0.95rem;
 }
 
 .modal-card > .button-row {
@@ -1915,6 +1929,12 @@ select {
   .settings-segment {
     width: 100%;
   }
+
+  .settings-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
 }
 
 @media (min-width: 680px) {
@@ -2025,5 +2045,17 @@ select {
 
   .store-row {
     grid-template-columns: 1fr;
+  }
+
+  .contribution-filter-row {
+    justify-content: flex-start;
+  }
+
+  .contribution-filter-field {
+    width: 100%;
+  }
+
+  .contribution-filter-field select {
+    width: 100%;
   }
 }
