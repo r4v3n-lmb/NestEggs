@@ -370,6 +370,22 @@ button {
   gap: 0.5rem;
 }
 
+.contribution-filter-row {
+  justify-content: flex-end;
+}
+
+.contribution-filter-field {
+  display: inline-grid;
+  gap: 0.25rem;
+  font-family: "Inter", sans-serif;
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+
+.contribution-filter-field select {
+  min-width: 11rem;
+}
+
 .status-pill {
   border-radius: 999px;
   padding: 0.35rem 0.72rem;
@@ -395,6 +411,18 @@ button {
   gap: 0.8rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 0.95rem;
+}
+
+.allocation-strip {
+  margin-bottom: 0.95rem;
+}
+
+.allocation-panel {
+  background: var(--surface-lowest);
+}
+
+.allocation-panel .line-item {
+  margin-bottom: 0.2rem;
 }
 
 .flash-card {
@@ -1190,6 +1218,12 @@ select {
   gap: 1.15rem;
 }
 
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
 .settings-profile-hero {
   position: relative;
   background: var(--surface-low);
@@ -1452,6 +1486,10 @@ select {
   box-shadow: 0 14px 32px rgba(25, 28, 28, 0.12);
   max-height: 90vh;
   overflow: auto;
+}
+
+.manager-modal {
+  width: min(960px, 100%);
 }
 
 .modal-card > .button-row {
@@ -1901,7 +1939,7 @@ select {
   }
 
   .kpi-bento {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .editorial-grid {

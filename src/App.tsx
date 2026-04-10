@@ -19,6 +19,14 @@ const navItems: NavItem[] = [
   { id: "goals", label: "Goals" }
 ];
 
+const settingsSections: { id: SettingsSectionId; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "profile", label: "Profile" },
+  { id: "security", label: "Security" },
+  { id: "support", label: "Support" },
+  { id: "actions", label: "Actions" }
+];
+
 type QuestTaskId =
   | "visit_dashboard"
   | "visit_expenses"
@@ -57,7 +65,7 @@ const GOALS_KEY = "nesteggs_goals_v1";
 const BUDGET_LIMITS_KEY = "nesteggs_budget_limits_v1";
 const BILLS_KEY = "nesteggs_bills_v1";
 const CONTRIBUTION_HISTORY_KEY = "nesteggs_contrib_history_v1";
-const APP_VERSION = "v0.1.4";
+const APP_VERSION = "v0.1.5";
 const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
 const FCM_TOKEN_KEY = "nesteggs_fcm_token_v1";
@@ -124,6 +132,7 @@ type GoalDraft = {
 };
 
 type ThemeMode = "light" | "dark";
+type SettingsSectionId = "general" | "profile" | "security" | "support" | "actions";
 
 type ProfileSettings = {
   displayName: string;
@@ -395,10 +404,14 @@ export default function App() {
     }
   });
   const [settingsPrefsDraft, setSettingsPrefsDraft] = useState<SettingsPrefs>(settingsPrefs);
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("general");
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickIncomeModalOpen, setQuickIncomeModalOpen] = useState(false);
   const [quickExpenseModalOpen, setQuickExpenseModalOpen] = useState(false);
   const [quickBillModalOpen, setQuickBillModalOpen] = useState(false);
+  const [quickIncomeTriedSubmit, setQuickIncomeTriedSubmit] = useState(false);
+  const [quickExpenseTriedSubmit, setQuickExpenseTriedSubmit] = useState(false);
+  const [quickBillTriedSubmit, setQuickBillTriedSubmit] = useState(false);
   const [quickIncomeDraft, setQuickIncomeDraft] = useState<QuickIncomeDraft>({
     name: "",
     type: "additional",
@@ -891,6 +904,7 @@ export default function App() {
     );
     setFundsModalOpen(true);
     addHistory("Opened Manage Income.");
+    showToast("info", "Manage Income opened.");
   };
 
   const showToast = (kind: ToastState["kind"], message: string) => {
@@ -1187,6 +1201,7 @@ export default function App() {
     setProfileDraft(profileSettings);
     setAlertThresholdDraft(alertThreshold);
     setSettingsPrefsDraft(settingsPrefs);
+    setSettingsSection("general");
     setSettingsOpen(true);
   };
 
@@ -1303,12 +1318,14 @@ export default function App() {
       type: "additional",
       amount: ""
     });
+    setQuickIncomeTriedSubmit(false);
     setQuickIncomeModalOpen(true);
   };
 
   const saveQuickIncomeModal = () => {
     const amount = normalizeNumber(quickIncomeDraft.amount);
     if (!quickIncomeDraft.name.trim() || !Number.isFinite(amount) || amount <= 0) {
+      setQuickIncomeTriedSubmit(true);
       addHistory("Quick add failed: enter a valid income name and amount.");
       showToast("error", "Enter a valid income name and amount.");
       return;
@@ -1339,12 +1356,14 @@ export default function App() {
       isRecurring: false,
       isPaid: false
     });
+    setQuickExpenseTriedSubmit(false);
     setQuickExpenseModalOpen(true);
   };
 
   const saveQuickExpenseModal = () => {
     const amount = normalizeNumber(expenseDraft.amount);
     if (!expenseDraft.category.trim() || !expenseDraft.subcategory.trim() || !Number.isFinite(amount) || amount <= 0) {
+      setQuickExpenseTriedSubmit(true);
       addHistory("Quick add failed: complete expense category, subcategory, and amount.");
       showToast("error", "Complete category, subcategory, and amount.");
       return;
@@ -1385,12 +1404,14 @@ export default function App() {
       owner: "You",
       isPaid: false
     });
+    setQuickBillTriedSubmit(false);
     setQuickBillModalOpen(true);
   };
 
   const saveQuickBillModal = () => {
     const amount = normalizeNumber(billDraft.amount);
     if (!billDraft.title.trim() || !billDraft.category.trim() || !billDraft.dueDate.trim() || !Number.isFinite(amount) || amount <= 0) {
+      setQuickBillTriedSubmit(true);
       addHistory("Quick add failed: complete bill title, category, due date, and amount.");
       showToast("error", "Complete title, category, due date, and amount.");
       return;
@@ -1839,9 +1860,14 @@ export default function App() {
           <p className="kpi-label">Budget Variance</p>
           <p className={`kpi-value ${totals.budgetVariance >= 0 ? "good" : "warn"}`}>{money(totals.budgetVariance)}</p>
         </article>
-        <article className="kpi-card">
-          <p className="kpi-label">Leftover After Allocations</p>
-          <p className={`kpi-value ${leftoverAfterAllocations >= 0 ? "good" : "warn"}`}>{money(leftoverAfterAllocations)}</p>
+      </section>
+      <section className="allocation-strip">
+        <article className="panel allocation-panel">
+          <div className="line-item">
+            <strong>Leftover After Allocations</strong>
+            <p className={`kpi-value ${leftoverAfterAllocations >= 0 ? "good" : "warn"}`}>{money(leftoverAfterAllocations)}</p>
+          </div>
+          <p className="muted">Income minus expenses, bills, and recurring goal contributions.</p>
         </article>
       </section>
 
@@ -1994,9 +2020,10 @@ export default function App() {
             <div className="panel-head compact">
               <div>
                 <h4>Cashflow Split</h4>
-                <p>Income allocation across expenses, bills, and goals.</p>
+                <p>Monthly split of income across expenses, bills, and goal contributions.</p>
               </div>
             </div>
+            <p className="muted">Bills are tracked separately from expenses so the two categories can overlap.</p>
             <div className="cashflow-bars" role="img" aria-label="Cashflow allocation chart">
               {cashflowSeries.map((item) => (
                 <article key={item.id} className="cashflow-bar-card">
@@ -2276,18 +2303,16 @@ export default function App() {
               <p>{showGoalHistory ? "Logged contribution records" : "Latest goal contributions across all types."}</p>
             </div>
           </div>
-          <div className="status-strip">
-            <button className={`btn btn-inline ${contributionFilter === "All" ? "btn-secondary" : "btn-ghost"}`} type="button" onClick={() => setContributionFilter("All")}>All</button>
-            {GOAL_TYPE_ORDER.map((type) => (
-              <button
-                key={type}
-                className={`btn btn-inline ${contributionFilter === type ? "btn-secondary" : "btn-ghost"}`}
-                type="button"
-                onClick={() => setContributionFilter(type)}
-              >
-                {GOAL_TYPE_LABELS[type]}
-              </button>
-            ))}
+          <div className="status-strip contribution-filter-row">
+            <label className="contribution-filter-field">
+              Filter
+              <select value={contributionFilter} onChange={(e) => setContributionFilter(e.target.value as "All" | ContributionRecord["contributionType"])}>
+                <option value="All">All</option>
+                {GOAL_TYPE_ORDER.map((type) => (
+                  <option key={type} value={type}>{GOAL_TYPE_LABELS[type]}</option>
+                ))}
+              </select>
+            </label>
           </div>
           <div className="stack-list">
             {showGoalHistory ? (
@@ -2448,287 +2473,306 @@ export default function App() {
             </div>
 
             <div className="settings-content">
-              <section className="settings-profile-hero">
-                <div className="settings-profile-avatar" aria-hidden>{initialsFromName(profileDraft.displayName)}</div>
-                <div className="settings-profile-meta">
-                  <h3>{profileDraft.displayName || "Your Profile"}</h3>
-                  <button className="settings-inline-link" type="button" onClick={() => showToast("info", "Update profile details below.")}>
-                    Manage Account
-                    <span className="material-symbols-outlined" aria-hidden>chevron_right</span>
+              <nav className="settings-tabs" aria-label="Settings sections">
+                {settingsSections.map((section) => (
+                  <button
+                    key={section.id}
+                    className={`btn btn-inline ${settingsSection === section.id ? "btn-secondary" : "btn-ghost"}`}
+                    type="button"
+                    onClick={() => setSettingsSection(section.id)}
+                  >
+                    {section.label}
                   </button>
-                </div>
-              </section>
+                ))}
+              </nav>
 
-              <section className="settings-group">
-                <h5 className="settings-group-label">Preferences</h5>
-                <div className="settings-list">
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>palette</span>
-                      <div>
-                        <strong>Theme</strong>
-                        <p>{themeMode === "dark" ? "Dark" : "Light"}</p>
-                      </div>
-                    </div>
-                    <div className="settings-segment">
-                      <button
-                        className={`btn btn-inline ${themeMode === "light" ? "btn-primary" : "btn-secondary"}`}
-                        type="button"
-                        onClick={() => setThemeMode("light")}
-                      >
-                        Light
-                      </button>
-                      <button
-                        className={`btn btn-inline ${themeMode === "dark" ? "btn-primary" : "btn-secondary"}`}
-                        type="button"
-                        onClick={() => setThemeMode("dark")}
-                      >
-                        Dark
+              {settingsSection === "general" ? (
+                <>
+                  <section className="settings-profile-hero">
+                    <div className="settings-profile-avatar" aria-hidden>{initialsFromName(profileDraft.displayName)}</div>
+                    <div className="settings-profile-meta">
+                      <h3>{profileDraft.displayName || "Your Profile"}</h3>
+                      <button className="settings-inline-link" type="button" onClick={() => setSettingsSection("profile")}>
+                        Manage Account
+                        <span className="material-symbols-outlined" aria-hidden>chevron_right</span>
                       </button>
                     </div>
-                  </article>
+                  </section>
 
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>payments</span>
-                      <div>
-                        <strong>Currency</strong>
-                        <p>{settingsPrefsDraft.currency}</p>
+                  <section className="settings-group">
+                    <h5 className="settings-group-label">Preferences</h5>
+                    <div className="settings-list">
+                      <article className="settings-row">
+                        <div className="settings-row-left">
+                          <span className="material-symbols-outlined" aria-hidden>palette</span>
+                          <div>
+                            <strong>Theme</strong>
+                            <p>{themeMode === "dark" ? "Dark" : "Light"}</p>
+                          </div>
+                        </div>
+                        <div className="settings-segment">
+                          <button
+                            className={`btn btn-inline ${themeMode === "light" ? "btn-primary" : "btn-secondary"}`}
+                            type="button"
+                            onClick={() => setThemeMode("light")}
+                          >
+                            Light
+                          </button>
+                          <button
+                            className={`btn btn-inline ${themeMode === "dark" ? "btn-primary" : "btn-secondary"}`}
+                            type="button"
+                            onClick={() => setThemeMode("dark")}
+                          >
+                            Dark
+                          </button>
+                        </div>
+                      </article>
+
+                      <article className="settings-row">
+                        <div className="settings-row-left">
+                          <span className="material-symbols-outlined" aria-hidden>payments</span>
+                          <div>
+                            <strong>Currency</strong>
+                            <p>{settingsPrefsDraft.currency}</p>
+                          </div>
+                        </div>
+                        <select
+                          className="settings-inline-select"
+                          value={settingsPrefsDraft.currency}
+                          onChange={(e) =>
+                            setSettingsPrefsDraft((prev) => ({ ...prev, currency: e.target.value as SettingsPrefs["currency"] }))
+                          }
+                        >
+                          <option value="ZAR">ZAR</option>
+                          <option value="USD">USD</option>
+                          <option value="EUR">EUR</option>
+                        </select>
+                      </article>
+
+                      <article className="settings-row">
+                        <div className="settings-row-left">
+                          <span className="material-symbols-outlined" aria-hidden>language</span>
+                          <div>
+                            <strong>Language</strong>
+                            <p>{settingsPrefsDraft.language}</p>
+                          </div>
+                        </div>
+                        <select
+                          className="settings-inline-select"
+                          value={settingsPrefsDraft.language}
+                          onChange={(e) =>
+                            setSettingsPrefsDraft((prev) => ({ ...prev, language: e.target.value as SettingsPrefs["language"] }))
+                          }
+                        >
+                          <option value="English (US)">English (US)</option>
+                          <option value="English (UK)">English (UK)</option>
+                        </select>
+                      </article>
+
+                      <article className="settings-row">
+                        <div className="settings-row-left">
+                          <span className="material-symbols-outlined" aria-hidden>flag</span>
+                          <div>
+                            <strong>Default Contribution Type</strong>
+                            <p>{GOAL_TYPE_LABELS[settingsPrefsDraft.defaultContributionType]}</p>
+                          </div>
+                        </div>
+                        <select
+                          className="settings-inline-select"
+                          value={settingsPrefsDraft.defaultContributionType}
+                          onChange={(e) =>
+                            setSettingsPrefsDraft((prev) => ({
+                              ...prev,
+                              defaultContributionType: e.target.value as ContributionRecord["contributionType"]
+                            }))
+                          }
+                        >
+                          {GOAL_TYPE_ORDER.map((type) => (
+                            <option key={type} value={type}>{GOAL_TYPE_LABELS[type]}</option>
+                          ))}
+                        </select>
+                      </article>
+
+                      <article className="settings-row">
+                        <div className="settings-row-left">
+                          <span className="material-symbols-outlined" aria-hidden>schedule</span>
+                          <div>
+                            <strong>Default Recurrence</strong>
+                            <p>{settingsPrefsDraft.defaultContributionRecurrence}</p>
+                          </div>
+                        </div>
+                        <select
+                          className="settings-inline-select"
+                          value={settingsPrefsDraft.defaultContributionRecurrence}
+                          onChange={(e) =>
+                            setSettingsPrefsDraft((prev) => ({
+                              ...prev,
+                              defaultContributionRecurrence: e.target.value as ContributionRecord["recurrence"]
+                            }))
+                          }
+                        >
+                          <option value="Weekly">Weekly</option>
+                          <option value="Monthly">Monthly</option>
+                          <option value="Quarterly">Quarterly</option>
+                        </select>
+                      </article>
+                    </div>
+                  </section>
+                </>
+              ) : null}
+
+              {settingsSection === "profile" ? (
+                <>
+                  <section className="settings-group">
+                    <h5 className="settings-group-label">Shared Ledger</h5>
+                    <article className="settings-partner-card">
+                      <div className="settings-row-left">
+                        <div className="settings-partner-icon">
+                          <span className="material-symbols-outlined" aria-hidden>group</span>
+                        </div>
+                        <div>
+                          <p className="eyebrow">Partner Connection</p>
+                          <strong>{profileDraft.partnerName || "Partner"}</strong>
+                        </div>
                       </div>
+                      <span className="material-symbols-outlined" aria-hidden>verified</span>
+                    </article>
+                    <div className="settings-list">
+                      <article className="settings-row">
+                        <div className="settings-row-left">
+                          <span className="material-symbols-outlined" aria-hidden>notifications_active</span>
+                          <div>
+                            <strong>Shared Notifications</strong>
+                            <p>{settingsPrefsDraft.sharedNotifications ? "Enabled" : "Disabled"}</p>
+                          </div>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={settingsPrefsDraft.sharedNotifications}
+                            onChange={(e) =>
+                              setSettingsPrefsDraft((prev) => ({ ...prev, sharedNotifications: e.target.checked }))
+                            }
+                          />
+                          <span />
+                        </label>
+                      </article>
                     </div>
-                    <select
-                      className="settings-inline-select"
-                      value={settingsPrefsDraft.currency}
-                      onChange={(e) =>
-                        setSettingsPrefsDraft((prev) => ({ ...prev, currency: e.target.value as SettingsPrefs["currency"] }))
-                      }
-                    >
-                      <option value="ZAR">ZAR</option>
-                      <option value="USD">USD</option>
-                      <option value="EUR">EUR</option>
-                    </select>
-                  </article>
+                  </section>
 
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>language</span>
-                      <div>
-                        <strong>Language</strong>
-                        <p>{settingsPrefsDraft.language}</p>
+                  <section className="settings-group">
+                    <h5 className="settings-group-label">Household Profile</h5>
+                    <div className="settings-form-grid">
+                      <label>
+                        Your Name
+                        <input
+                          value={profileDraft.displayName}
+                          onChange={(e) => setProfileDraft((prev) => ({ ...prev, displayName: e.target.value }))}
+                          placeholder="Revan Lombard"
+                        />
+                      </label>
+                      <label>
+                        Partner Name
+                        <input
+                          value={profileDraft.partnerName}
+                          onChange={(e) => setProfileDraft((prev) => ({ ...prev, partnerName: e.target.value }))}
+                          placeholder="Bronwen Anderson"
+                        />
+                      </label>
+                      <label>
+                        Household Label
+                        <input
+                          value={profileDraft.householdLabel}
+                          onChange={(e) => setProfileDraft((prev) => ({ ...prev, householdLabel: e.target.value }))}
+                          placeholder="Our Ledger"
+                        />
+                      </label>
+                      <label>
+                        Budget Alert Threshold ({Math.round(alertThresholdDraft)}%)
+                        <input
+                          type="range"
+                          min={40}
+                          max={95}
+                          step={1}
+                          value={alertThresholdDraft}
+                          onChange={(e) => setAlertThresholdDraft(Number(e.target.value))}
+                        />
+                      </label>
+                    </div>
+                  </section>
+                </>
+              ) : null}
+
+              {settingsSection === "security" ? (
+                <section className="settings-group">
+                  <h5 className="settings-group-label">Security</h5>
+                  <div className="settings-list">
+                    <article className="settings-row">
+                      <div className="settings-row-left">
+                        <span className="material-symbols-outlined" aria-hidden>face</span>
+                        <div>
+                          <strong>Face ID / Biometrics</strong>
+                          <p>{settingsPrefsDraft.biometricsEnabled ? "Enabled" : "Disabled"}</p>
+                        </div>
                       </div>
-                    </div>
-                    <select
-                      className="settings-inline-select"
-                      value={settingsPrefsDraft.language}
-                      onChange={(e) =>
-                        setSettingsPrefsDraft((prev) => ({ ...prev, language: e.target.value as SettingsPrefs["language"] }))
-                      }
-                    >
-                      <option value="English (US)">English (US)</option>
-                      <option value="English (UK)">English (UK)</option>
-                    </select>
-                  </article>
-
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>flag</span>
-                      <div>
-                        <strong>Default Contribution Type</strong>
-                        <p>{GOAL_TYPE_LABELS[settingsPrefsDraft.defaultContributionType]}</p>
-                      </div>
-                    </div>
-                    <select
-                      className="settings-inline-select"
-                      value={settingsPrefsDraft.defaultContributionType}
-                      onChange={(e) =>
-                        setSettingsPrefsDraft((prev) => ({
-                          ...prev,
-                          defaultContributionType: e.target.value as ContributionRecord["contributionType"]
-                        }))
-                      }
-                    >
-                      {GOAL_TYPE_ORDER.map((type) => (
-                        <option key={type} value={type}>{GOAL_TYPE_LABELS[type]}</option>
-                      ))}
-                    </select>
-                  </article>
-
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>schedule</span>
-                      <div>
-                        <strong>Default Recurrence</strong>
-                        <p>{settingsPrefsDraft.defaultContributionRecurrence}</p>
-                      </div>
-                    </div>
-                    <select
-                      className="settings-inline-select"
-                      value={settingsPrefsDraft.defaultContributionRecurrence}
-                      onChange={(e) =>
-                        setSettingsPrefsDraft((prev) => ({
-                          ...prev,
-                          defaultContributionRecurrence: e.target.value as ContributionRecord["recurrence"]
-                        }))
-                      }
-                    >
-                      <option value="Weekly">Weekly</option>
-                      <option value="Monthly">Monthly</option>
-                      <option value="Quarterly">Quarterly</option>
-                    </select>
-                  </article>
-                </div>
-              </section>
-
-              <section className="settings-group">
-                <h5 className="settings-group-label">Shared Ledger</h5>
-                <article className="settings-partner-card">
-                  <div className="settings-row-left">
-                    <div className="settings-partner-icon">
-                      <span className="material-symbols-outlined" aria-hidden>group</span>
-                    </div>
-                    <div>
-                      <p className="eyebrow">Partner Connection</p>
-                      <strong>{profileDraft.partnerName || "Partner"}</strong>
-                    </div>
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          checked={settingsPrefsDraft.biometricsEnabled}
+                          onChange={(e) =>
+                            setSettingsPrefsDraft((prev) => ({ ...prev, biometricsEnabled: e.target.checked }))
+                          }
+                        />
+                        <span />
+                      </label>
+                    </article>
                   </div>
-                  <span className="material-symbols-outlined" aria-hidden>verified</span>
-                </article>
-                <div className="settings-list">
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>notifications_active</span>
-                      <div>
-                        <strong>Shared Notifications</strong>
-                        <p>{settingsPrefsDraft.sharedNotifications ? "Enabled" : "Disabled"}</p>
+                </section>
+              ) : null}
+
+              {settingsSection === "support" ? (
+                <section className="settings-group">
+                  <h5 className="settings-group-label">Support</h5>
+                  <div className="settings-list">
+                    <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("help")}>
+                      <div className="settings-row-left">
+                        <span className="material-symbols-outlined" aria-hidden>help</span>
+                        <strong>Help Center</strong>
                       </div>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={settingsPrefsDraft.sharedNotifications}
-                        onChange={(e) =>
-                          setSettingsPrefsDraft((prev) => ({ ...prev, sharedNotifications: e.target.checked }))
-                        }
-                      />
-                      <span />
-                    </label>
-                  </article>
-                </div>
-              </section>
-
-              <section className="settings-group">
-                <h5 className="settings-group-label">Security</h5>
-                <div className="settings-list">
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>face</span>
-                      <div>
-                        <strong>Face ID / Biometrics</strong>
-                        <p>{settingsPrefsDraft.biometricsEnabled ? "Enabled" : "Disabled"}</p>
+                      <span className="material-symbols-outlined settings-chevron" aria-hidden>open_in_new</span>
+                    </button>
+                    <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("privacy")}>
+                      <div className="settings-row-left">
+                        <span className="material-symbols-outlined" aria-hidden>shield</span>
+                        <strong>Privacy Policy</strong>
                       </div>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={settingsPrefsDraft.biometricsEnabled}
-                        onChange={(e) =>
-                          setSettingsPrefsDraft((prev) => ({ ...prev, biometricsEnabled: e.target.checked }))
-                        }
-                      />
-                      <span />
-                    </label>
-                  </article>
-
-                  <article className="settings-row">
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>lock</span>
-                      <div>
-                        <strong>Profile & Household</strong>
-                        <p>Update names and household label</p>
+                      <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
+                    </button>
+                    <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("terms")}>
+                      <div className="settings-row-left">
+                        <span className="material-symbols-outlined" aria-hidden>description</span>
+                        <strong>Terms of Service</strong>
                       </div>
-                    </div>
-                    <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
-                  </article>
-                </div>
+                      <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
+                    </button>
+                  </div>
+                </section>
+              ) : null}
 
-                <div className="settings-form-grid">
-                  <label>
-                    Your Name
-                    <input
-                      value={profileDraft.displayName}
-                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, displayName: e.target.value }))}
-                      placeholder="Revan Lombard"
-                    />
-                  </label>
-                  <label>
-                    Partner Name
-                    <input
-                      value={profileDraft.partnerName}
-                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, partnerName: e.target.value }))}
-                      placeholder="Bronwen Anderson"
-                    />
-                  </label>
-                  <label>
-                    Household Label
-                    <input
-                      value={profileDraft.householdLabel}
-                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, householdLabel: e.target.value }))}
-                      placeholder="Our Ledger"
-                    />
-                  </label>
-                  <label>
-                    Budget Alert Threshold ({Math.round(alertThresholdDraft)}%)
-                    <input
-                      type="range"
-                      min={40}
-                      max={95}
-                      step={1}
-                      value={alertThresholdDraft}
-                      onChange={(e) => setAlertThresholdDraft(Number(e.target.value))}
-                    />
-                  </label>
-                </div>
-              </section>
-
-              <section className="settings-group">
-                <h5 className="settings-group-label">Support</h5>
-                <div className="settings-list">
-                  <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("help")}>
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>help</span>
-                      <strong>Help Center</strong>
-                    </div>
-                    <span className="material-symbols-outlined settings-chevron" aria-hidden>open_in_new</span>
-                  </button>
-                  <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("privacy")}>
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>shield</span>
-                      <strong>Privacy Policy</strong>
-                    </div>
-                    <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
-                  </button>
-                  <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("terms")}>
-                    <div className="settings-row-left">
-                      <span className="material-symbols-outlined" aria-hidden>description</span>
-                      <strong>Terms of Service</strong>
-                    </div>
-                    <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
-                  </button>
-                </div>
-              </section>
-
-              <section className="settings-group">
-                <h5 className="settings-group-label">App Actions</h5>
-                <div className="settings-actions-grid">
-                  <button className="btn btn-secondary" type="button" onClick={() => void enableNotifications()} disabled={notificationPermission === "denied"}>
-                    {notificationPermission === "denied" ? "Alerts blocked" : "Enable Alerts"}
-                  </button>
-                  <button className="btn btn-ghost" type="button" onClick={() => void sendTestAlert()}>Send Test Alert</button>
-                  <button className="btn btn-secondary" type="button" onClick={resetNavigationQuest}>Reset Onboarding Quest</button>
-                  <button className="btn btn-ghost" type="button" onClick={clearActivityHistory}>Clear Activity Log</button>
-                  <button className="btn btn-secondary" type="button" onClick={exportAllData}>Export All CSV</button>
-                </div>
-              </section>
+              {settingsSection === "actions" ? (
+                <section className="settings-group">
+                  <h5 className="settings-group-label">App Actions</h5>
+                  <div className="settings-actions-grid">
+                    <button className="btn btn-secondary" type="button" onClick={() => void enableNotifications()} disabled={notificationPermission === "denied"}>
+                      {notificationPermission === "denied" ? "Alerts blocked" : "Enable Alerts"}
+                    </button>
+                    <button className="btn btn-ghost" type="button" onClick={() => void sendTestAlert()}>Send Test Alert</button>
+                    <button className="btn btn-secondary" type="button" onClick={resetNavigationQuest}>Reset Onboarding Quest</button>
+                    <button className="btn btn-ghost" type="button" onClick={clearActivityHistory}>Clear Activity Log</button>
+                    <button className="btn btn-secondary" type="button" onClick={exportAllData}>Export All CSV</button>
+                  </div>
+                </section>
+              ) : null}
 
               <div className="settings-signout-wrap">
                 <button className="settings-signout-btn" type="button" onClick={signOutFromSettings}>
@@ -2815,7 +2859,7 @@ export default function App() {
                   onChange={(e) => setQuickIncomeDraft((prev) => ({ ...prev, name: e.target.value }))}
                   placeholder="Salary"
                 />
-                {quickIncomeDraft.name.trim().length === 0 ? <p className="warn-text">Name is required.</p> : null}
+                {quickIncomeTriedSubmit && quickIncomeDraft.name.trim().length === 0 ? <p className="warn-text">Name is required.</p> : null}
               </label>
               <label>
                 Income Type
@@ -2836,9 +2880,9 @@ export default function App() {
                   onChange={(e) => setQuickIncomeDraft((prev) => ({ ...prev, amount: e.target.value }))}
                   placeholder="25000"
                 />
-                {quickIncomeDraft.amount && (!Number.isFinite(normalizeNumber(quickIncomeDraft.amount)) || normalizeNumber(quickIncomeDraft.amount) <= 0) ? (
-                  <p className="warn-text">Enter a valid amount.</p>
-                ) : null}
+                {(quickIncomeDraft.amount
+                  ? !Number.isFinite(normalizeNumber(quickIncomeDraft.amount)) || normalizeNumber(quickIncomeDraft.amount) <= 0
+                  : quickIncomeTriedSubmit) ? <p className="warn-text">Enter a valid amount.</p> : null}
               </label>
             </div>
             <div className="button-row">
@@ -2866,7 +2910,7 @@ export default function App() {
                   onChange={(e) => setExpenseDraft((prev) => ({ ...prev, category: e.target.value }))}
                   placeholder="Housing"
                 />
-                {expenseDraft.category.trim().length === 0 ? <p className="warn-text">Category is required.</p> : null}
+                {quickExpenseTriedSubmit && expenseDraft.category.trim().length === 0 ? <p className="warn-text">Category is required.</p> : null}
               </label>
               <label>
                 Subcategory
@@ -2875,7 +2919,7 @@ export default function App() {
                   onChange={(e) => setExpenseDraft((prev) => ({ ...prev, subcategory: e.target.value }))}
                   placeholder="Rent"
                 />
-                {expenseDraft.subcategory.trim().length === 0 ? <p className="warn-text">Subcategory is required.</p> : null}
+                {quickExpenseTriedSubmit && expenseDraft.subcategory.trim().length === 0 ? <p className="warn-text">Subcategory is required.</p> : null}
               </label>
               <label>
                 Amount
@@ -2886,9 +2930,9 @@ export default function App() {
                   onChange={(e) => setExpenseDraft((prev) => ({ ...prev, amount: e.target.value }))}
                   placeholder="12000"
                 />
-                {expenseDraft.amount && (!Number.isFinite(normalizeNumber(expenseDraft.amount)) || normalizeNumber(expenseDraft.amount) <= 0) ? (
-                  <p className="warn-text">Enter a valid amount.</p>
-                ) : null}
+                {(expenseDraft.amount
+                  ? !Number.isFinite(normalizeNumber(expenseDraft.amount)) || normalizeNumber(expenseDraft.amount) <= 0
+                  : quickExpenseTriedSubmit) ? <p className="warn-text">Enter a valid amount.</p> : null}
               </label>
               <label>
                 Month (YYYY-MM)
@@ -2948,7 +2992,7 @@ export default function App() {
                   onChange={(e) => setBillDraft((prev) => ({ ...prev, title: e.target.value }))}
                   placeholder="Internet"
                 />
-                {billDraft.title.trim().length === 0 ? <p className="warn-text">Title is required.</p> : null}
+                {quickBillTriedSubmit && billDraft.title.trim().length === 0 ? <p className="warn-text">Title is required.</p> : null}
               </label>
               <label>
                 Category
@@ -2957,6 +3001,7 @@ export default function App() {
                   onChange={(e) => setBillDraft((prev) => ({ ...prev, category: e.target.value }))}
                   placeholder="Utilities"
                 />
+                {quickBillTriedSubmit && billDraft.category.trim().length === 0 ? <p className="warn-text">Category is required.</p> : null}
               </label>
               <label>
                 Amount
@@ -2967,9 +3012,9 @@ export default function App() {
                   onChange={(e) => setBillDraft((prev) => ({ ...prev, amount: e.target.value }))}
                   placeholder="899"
                 />
-                {billDraft.amount && (!Number.isFinite(normalizeNumber(billDraft.amount)) || normalizeNumber(billDraft.amount) <= 0) ? (
-                  <p className="warn-text">Enter a valid amount.</p>
-                ) : null}
+                {(billDraft.amount
+                  ? !Number.isFinite(normalizeNumber(billDraft.amount)) || normalizeNumber(billDraft.amount) <= 0
+                  : quickBillTriedSubmit) ? <p className="warn-text">Enter a valid amount.</p> : null}
               </label>
               <label>
                 Due Date
@@ -2978,6 +3023,7 @@ export default function App() {
                   onChange={(e) => setBillDraft((prev) => ({ ...prev, dueDate: e.target.value }))}
                   placeholder={`${currentMonth()}-20`}
                 />
+                {quickBillTriedSubmit && !billDraft.dueDate.trim() ? <p className="warn-text">Due date is required.</p> : null}
               </label>
               <label>
                 Owner
@@ -3007,8 +3053,8 @@ export default function App() {
       ) : null}
 
       {billsModalOpen ? (
-        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Manage bills">
-          <section className="modal-card app-sheet">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage bills">
+          <section className="modal-card manager-modal">
             <div className="panel-head compact">
               <div>
                 <h4>Bills Manager</h4>
@@ -3129,8 +3175,8 @@ export default function App() {
       ) : null}
 
       {expensesModalOpen ? (
-        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Manage expenses">
-          <section className="modal-card app-sheet">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage expenses">
+          <section className="modal-card manager-modal">
             <div className="panel-head compact">
               <div>
                 <h4>Expenses Manager</h4>
@@ -3255,8 +3301,8 @@ export default function App() {
       ) : null}
 
       {fundsModalOpen ? (
-        <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Manage funds">
-          <section className="modal-card app-sheet">
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage funds">
+          <section className="modal-card manager-modal">
             <div className="panel-head compact">
               <div>
                 <h4>Manage Funds</h4>
