@@ -28,9 +28,18 @@ export const mockBudgetLimits: BudgetCategoryLimit[] = [
 export const mockGoals: SavingsGoal[] = [
   {
     id: "g-1",
+    goalType: "Savings",
     title: "Tax-Free Savings",
     targetAmount: 36000,
     currentAmount: 18300,
     taxFreeLimit: 36000
+  },
+  {
+    id: "g-2",
+    goalType: "Investment",
+    title: "Investment Portfolio",
+    targetAmount: 120000,
+    currentAmount: 27500,
+    taxFreeLimit: 120000
   }
 ];

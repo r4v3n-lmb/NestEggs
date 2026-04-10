@@ -27,6 +27,7 @@ export type BudgetCategoryLimit = {
 
 export type SavingsGoal = {
   id: string;
+  goalType: "Savings" | "Investment";
   title: string;
   targetAmount: number;
   currentAmount: number;

@@ -48,16 +48,21 @@ const questTasks: QuestTask[] = [
 
 const QUEST_PROGRESS_KEY = "nesteggs_nav_quest_progress_v1";
 const QUEST_OPEN_KEY = "nesteggs_nav_quest_open_v1";
+const PROFILE_SETTINGS_KEY = "nesteggs_profile_settings_v1";
+const THEME_MODE_KEY = "nesteggs_theme_mode_v1";
+const SETTINGS_PREFS_KEY = "nesteggs_settings_prefs_v1";
 const APP_VERSION = "v0.1.1";
 const APP_LOGO_FILE = "20260409_0931_NestEggs App Logo_simple_compose_01knrjcdhpexntcsmjxq2w4n97.png";
 const APP_LOGO_SRC = `${import.meta.env.BASE_URL}${encodeURIComponent(APP_LOGO_FILE)}`;
 const FCM_TOKEN_KEY = "nesteggs_fcm_token_v1";
-const GOAL_TYPE_ORDER: ContributionRecord["contributionType"][] = ["Savings", "Investment", "Retirement", "Emergency"];
+const GOAL_TYPE_ORDER: ContributionRecord["contributionType"][] = ["Savings", "Investment"];
+const GOAL_TYPE_LABELS: Record<ContributionRecord["contributionType"], string> = {
+  Savings: "Savings",
+  Investment: "Investments"
+};
 const GOAL_DEFAULTS: Record<ContributionRecord["contributionType"], { title: string; target: number }> = {
   Savings: { title: "Savings Goal", target: 36000 },
-  Investment: { title: "Investment Goal", target: 120000 },
-  Retirement: { title: "Retirement Goal", target: 500000 },
-  Emergency: { title: "Emergency Goal", target: 50000 }
+  Investment: { title: "Investment Goal", target: 120000 }
 };
 
 type FoodStoreDraft = {
@@ -81,9 +86,24 @@ type ContributionRecord = {
   id: string;
   createdAt: string;
   amount: number;
-  contributionType: "Savings" | "Investment" | "Retirement" | "Emergency";
+  contributionType: "Savings" | "Investment";
   isRecurring: boolean;
   recurrence: "Weekly" | "Monthly" | "Quarterly";
+};
+
+type ThemeMode = "light" | "dark";
+
+type ProfileSettings = {
+  displayName: string;
+  partnerName: string;
+  householdLabel: string;
+};
+
+type SettingsPrefs = {
+  currency: "ZAR" | "USD" | "EUR";
+  language: "English (US)" | "English (UK)";
+  sharedNotifications: boolean;
+  biometricsEnabled: boolean;
 };
 
 type ExpenseDraft = {
@@ -133,6 +153,31 @@ type UndoState = {
 };
 
 const monthKey = currentMonth();
+const defaultProfileSettings: ProfileSettings = {
+  displayName: "Revan Lombard",
+  partnerName: "Bronwen Anderson",
+  householdLabel: "Our Ledger"
+};
+const defaultSettingsPrefs: SettingsPrefs = {
+  currency: "ZAR",
+  language: "English (US)",
+  sharedNotifications: true,
+  biometricsEnabled: true
+};
+const createEmptyQuestProgress = () =>
+  Object.fromEntries(questTasks.map((task) => [task.id, false])) as Record<QuestTaskId, boolean>;
+
+const initialsFromName = (name: string) => {
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length === 0) return "NA";
+  const first = parts.at(0) ?? "";
+  if (parts.length === 1) return first.slice(0, 2).toUpperCase();
+  const last = parts.at(-1) ?? "";
+  return `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
+};
 
 const initialBills: HouseholdBill[] = [
   {
@@ -216,6 +261,43 @@ export default function App() {
   const [contributionRecurringDraft, setContributionRecurringDraft] = useState(false);
   const [contributionFrequencyDraft, setContributionFrequencyDraft] =
     useState<ContributionRecord["recurrence"]>("Monthly");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    const raw = localStorage.getItem(THEME_MODE_KEY);
+    return raw === "dark" ? "dark" : "light";
+  });
+  const [profileSettings, setProfileSettings] = useState<ProfileSettings>(() => {
+    const raw = localStorage.getItem(PROFILE_SETTINGS_KEY);
+    if (!raw) return defaultProfileSettings;
+    try {
+      const parsed = JSON.parse(raw) as Partial<ProfileSettings>;
+      return {
+        displayName: parsed.displayName?.trim() || defaultProfileSettings.displayName,
+        partnerName: parsed.partnerName?.trim() || defaultProfileSettings.partnerName,
+        householdLabel: parsed.householdLabel?.trim() || defaultProfileSettings.householdLabel
+      };
+    } catch {
+      return defaultProfileSettings;
+    }
+  });
+  const [profileDraft, setProfileDraft] = useState<ProfileSettings>(profileSettings);
+  const [alertThresholdDraft, setAlertThresholdDraft] = useState<number>(alertThreshold);
+  const [settingsPrefs, setSettingsPrefs] = useState<SettingsPrefs>(() => {
+    const raw = localStorage.getItem(SETTINGS_PREFS_KEY);
+    if (!raw) return defaultSettingsPrefs;
+    try {
+      const parsed = JSON.parse(raw) as Partial<SettingsPrefs>;
+      return {
+        currency: parsed.currency === "USD" || parsed.currency === "EUR" ? parsed.currency : "ZAR",
+        language: parsed.language === "English (UK)" ? "English (UK)" : "English (US)",
+        sharedNotifications: parsed.sharedNotifications ?? true,
+        biometricsEnabled: parsed.biometricsEnabled ?? true
+      };
+    } catch {
+      return defaultSettingsPrefs;
+    }
+  });
+  const [settingsPrefsDraft, setSettingsPrefsDraft] = useState<SettingsPrefs>(settingsPrefs);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickIncomeModalOpen, setQuickIncomeModalOpen] = useState(false);
   const [quickExpenseModalOpen, setQuickExpenseModalOpen] = useState(false);
@@ -241,7 +323,7 @@ export default function App() {
     return raw ? raw === "true" : true;
   });
   const [questProgress, setQuestProgress] = useState<Record<QuestTaskId, boolean>>(() => {
-    const base = Object.fromEntries(questTasks.map((task) => [task.id, false])) as Record<QuestTaskId, boolean>;
+    const base = createEmptyQuestProgress();
     const raw = localStorage.getItem(QUEST_PROGRESS_KEY);
     if (!raw) return base;
     try {
@@ -263,6 +345,9 @@ export default function App() {
   const undoTimerRef = useRef<number | null>(null);
 
   const { isOnline, pendingCount } = useOfflineQueue();
+  const greetingName = profileSettings.displayName.trim().split(/\s+/)[0] || profileSettings.displayName;
+  const primaryInitials = initialsFromName(profileSettings.displayName);
+  const partnerInitials = initialsFromName(profileSettings.partnerName);
 
   const markQuest = (taskId: QuestTaskId) => {
     setQuestProgress((prev) => {
@@ -436,7 +521,7 @@ export default function App() {
       const items = contributionHistory.filter((item) => item.contributionType === type);
       const total = items.reduce((sum, item) => sum + item.amount, 0);
       const recurringCount = items.filter((item) => item.isRecurring).length;
-      const matchedGoal = goals.find((goal) => goal.title.toLowerCase().includes(type.toLowerCase()));
+      const matchedGoal = goals.find((goal) => goal.goalType === type);
       const target = matchedGoal?.targetAmount ?? GOAL_DEFAULTS[type].target;
       const progress = Math.min(100, Math.round((total / Math.max(1, target)) * 100));
       const share = Math.max(6, Math.round((total / maxContribution) * 100));
@@ -466,7 +551,8 @@ export default function App() {
     expensesModalOpen ||
     fundsModalOpen ||
     foodBudgetModalOpen ||
-    contributionModalOpen;
+    contributionModalOpen ||
+    settingsOpen;
 
   useEffect(() => {
     localStorage.setItem(QUEST_PROGRESS_KEY, JSON.stringify(questProgress));
@@ -475,6 +561,19 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(QUEST_OPEN_KEY, String(questOpen));
   }, [questOpen]);
+
+  useEffect(() => {
+    localStorage.setItem(PROFILE_SETTINGS_KEY, JSON.stringify(profileSettings));
+  }, [profileSettings]);
+
+  useEffect(() => {
+    localStorage.setItem(THEME_MODE_KEY, themeMode);
+    document.documentElement.dataset.theme = themeMode;
+  }, [themeMode]);
+
+  useEffect(() => {
+    localStorage.setItem(SETTINGS_PREFS_KEY, JSON.stringify(settingsPrefs));
+  }, [settingsPrefs]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -743,6 +842,65 @@ export default function App() {
     setContributionModalOpen(true);
   };
 
+  const openSettingsModal = () => {
+    setProfileDraft(profileSettings);
+    setAlertThresholdDraft(alertThreshold);
+    setSettingsPrefsDraft(settingsPrefs);
+    setSettingsOpen(true);
+  };
+
+  const saveSettingsModal = () => {
+    const nextDisplay = profileDraft.displayName.trim();
+    const nextPartner = profileDraft.partnerName.trim();
+    const nextHousehold = profileDraft.householdLabel.trim();
+    if (!nextDisplay || !nextPartner || !nextHousehold) {
+      showToast("error", "Complete all profile fields.");
+      addHistory("Settings update failed: profile fields were incomplete.");
+      return;
+    }
+    const nextThreshold = Math.max(40, Math.min(95, Math.round(alertThresholdDraft)));
+    setProfileSettings({
+      displayName: nextDisplay,
+      partnerName: nextPartner,
+      householdLabel: nextHousehold
+    });
+    setSettingsPrefs(settingsPrefsDraft);
+    setAlertThreshold(nextThreshold);
+    setSettingsOpen(false);
+    showToast("success", "Settings saved.");
+    addHistory("Updated profile, theme, and preferences from Settings.");
+  };
+
+  const resetNavigationQuest = () => {
+    setQuestProgress(createEmptyQuestProgress());
+    setQuestOpen(true);
+    showToast("info", "Navigation quest reset.");
+    addHistory("Reset the navigation quest progress.");
+  };
+
+  const clearActivityHistory = () => {
+    setActionHistory([]);
+    setActionMessage("");
+    showToast("info", "Activity history cleared.");
+  };
+
+  const openSupportLink = (section: "help" | "privacy" | "terms") => {
+    const urls: Record<typeof section, string> = {
+      help: "https://support.google.com",
+      privacy: "https://firebase.google.com/support/privacy",
+      terms: "https://firebase.google.com/terms"
+    };
+    window.open(urls[section], "_blank", "noopener,noreferrer");
+  };
+
+  const signOutFromSettings = () => {
+    setSettingsOpen(false);
+    setIsAuthenticated(false);
+    setAuthStatus("Signed out.");
+    addHistory("Signed out from Settings.");
+    showToast("info", "Signed out.");
+  };
+
   const openBillsModal = () => {
     setBillMode("view");
     setSelectedBillId((prev) => prev ?? bills[0]?.id ?? null);
@@ -879,7 +1037,7 @@ export default function App() {
     setGoals((prev) => {
       const contribution = Math.round(amount);
       const targetType = contributionTypeDraft;
-      const existingIndex = prev.findIndex((goal) => goal.title.toLowerCase().includes(targetType.toLowerCase()));
+      const existingIndex = prev.findIndex((goal) => goal.goalType === targetType);
 
       if (existingIndex >= 0) {
         return prev.map((goal, idx) =>
@@ -897,6 +1055,7 @@ export default function App() {
         ...prev,
         {
           id: `goal-${targetType.toLowerCase()}-${Date.now()}`,
+          goalType: targetType,
           title: fallback.title,
           targetAmount: fallback.target,
           currentAmount: Math.min(contribution, fallback.target),
@@ -1234,7 +1393,7 @@ export default function App() {
   const renderDashboard = () => (
     <>
       <section className="editorial-head">
-        <h2>Morning, Bronwen Anderson.</h2>
+        <h2>Morning, {greetingName}.</h2>
         <div className="status-strip">
           <span className={`status-pill ${isOnline ? "ok" : "warn"}`}>{isOnline ? "Online sync" : "Offline mode"}</span>
           <span className="status-pill neutral">{pendingCount} pending actions</span>
@@ -1633,30 +1792,52 @@ export default function App() {
           </div>
         </article>
 
-        {goals.map((goal, idx) => {
-          const progress = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100));
+        {GOAL_TYPE_ORDER.map((goalType) => {
+          const sectionGoals = goals.filter((goal) => goal.goalType === goalType);
           return (
-            <article key={goal.id} className="panel goal-card-large">
-              <div className="goal-head">
+            <article key={goalType} className="panel goal-type-section">
+              <div className="panel-head compact">
                 <div>
-                  <p className="eyebrow">Savings Goal</p>
-                  <h4>{goal.title}</h4>
+                  <h4>{GOAL_TYPE_LABELS[goalType]}</h4>
+                  <p>{goalType === "Savings" ? "Cash and reserve targets." : "Growth and portfolio targets."}</p>
                 </div>
-                <p className="goal-amount">{money(goal.currentAmount)} / {money(goal.targetAmount)}</p>
               </div>
-              <div className="goal-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
-                <span style={{ width: `${progress}%` }} />
+              <div className="stack-list">
+                {sectionGoals.length > 0 ? (
+                  sectionGoals.map((goal) => {
+                    const progress = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100));
+                    return (
+                      <article key={goal.id} className="list-card goal-card-large">
+                        <div className="goal-head">
+                          <div>
+                            <p className="eyebrow">{goalType === "Savings" ? "Savings Goal" : "Investment Goal"}</p>
+                            <h4>{goal.title}</h4>
+                          </div>
+                          <p className="goal-amount">{money(goal.currentAmount)} / {money(goal.targetAmount)}</p>
+                        </div>
+                        <div className="goal-meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                          <span style={{ width: `${progress}%` }} />
+                        </div>
+                        <p className="goal-foot">{progress}% complete</p>
+                      </article>
+                    );
+                  })
+                ) : (
+                  <article className="list-card neutral-item">
+                    <p>No {goalType.toLowerCase()} goals yet.</p>
+                  </article>
+                )}
               </div>
-              <p className="goal-foot">{progress}% complete</p>
-              {idx === 0 ? (
-                <div className="button-row">
-                  <button className="btn btn-primary" type="button" onClick={openContributionModal}>Add Contribution</button>
-                  <button className="btn btn-secondary" type="button" onClick={handleViewHistory}>View History</button>
-                </div>
-              ) : null}
             </article>
           );
         })}
+
+        <article className="panel goal-actions-panel">
+          <div className="button-row">
+            <button className="btn btn-primary" type="button" onClick={openContributionModal}>Add Contribution</button>
+            <button className="btn btn-secondary" type="button" onClick={handleViewHistory}>View History</button>
+          </div>
+        </article>
 
         <article className="panel">
           <div className="panel-head compact">
@@ -1750,16 +1931,21 @@ export default function App() {
   return (
     <div className="ledger-root">
       <header className="topbar">
+        <div className="topbar-controls">
+          <p className="version-chip topbar-version">{APP_VERSION}</p>
+          <button className="icon-btn settings-trigger" type="button" aria-label="Open settings" onClick={openSettingsModal}>
+            <span className="material-symbols-outlined" aria-hidden>settings</span>
+          </button>
+        </div>
         <div className="brand-row">
           <img className="brand-logo" src={APP_LOGO_SRC} alt="NestEggs logo" />
           <div className="avatar-stack" aria-hidden>
-            <span className="avatar-chip">RL</span>
-            <span className="avatar-chip partner">BA</span>
+            <span className="avatar-chip">{primaryInitials}</span>
+            <span className="avatar-chip partner">{partnerInitials}</span>
           </div>
           <div>
             <p className="eyebrow">NestEggs</p>
-            <h1 className="brand-title">Our Ledger</h1>
-            <p className="version-chip">{APP_VERSION}</p>
+            <h1 className="brand-title">{profileSettings.householdLabel}</h1>
           </div>
         </div>
         <nav className="desktop-nav" aria-label="Primary">
@@ -1804,6 +1990,265 @@ export default function App() {
       </nav>
 
       <button className="fab" type="button" aria-label="Add transaction" onClick={handleFab}>+</button>
+
+      {settingsOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Settings">
+          <section className="modal-card settings-modal">
+            <div className="settings-head">
+              <div className="settings-head-left">
+                <button className="icon-btn" type="button" aria-label="Close settings" onClick={() => setSettingsOpen(false)}>
+                  <span className="material-symbols-outlined" aria-hidden>arrow_back</span>
+                </button>
+                <h4>Settings</h4>
+              </div>
+              <button className="btn btn-secondary btn-inline" type="button" onClick={saveSettingsModal}>Save</button>
+            </div>
+
+            <div className="settings-content">
+              <section className="settings-profile-hero">
+                <div className="settings-profile-avatar" aria-hidden>{initialsFromName(profileDraft.displayName)}</div>
+                <div className="settings-profile-meta">
+                  <h3>{profileDraft.displayName || "Your Profile"}</h3>
+                  <button className="settings-inline-link" type="button" onClick={() => showToast("info", "Update profile details below.")}>
+                    Manage Account
+                    <span className="material-symbols-outlined" aria-hidden>chevron_right</span>
+                  </button>
+                </div>
+              </section>
+
+              <section className="settings-group">
+                <h5 className="settings-group-label">Preferences</h5>
+                <div className="settings-list">
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>palette</span>
+                      <div>
+                        <strong>Theme</strong>
+                        <p>{themeMode === "dark" ? "Dark" : "Light"}</p>
+                      </div>
+                    </div>
+                    <div className="settings-segment">
+                      <button
+                        className={`btn btn-inline ${themeMode === "light" ? "btn-primary" : "btn-secondary"}`}
+                        type="button"
+                        onClick={() => setThemeMode("light")}
+                      >
+                        Light
+                      </button>
+                      <button
+                        className={`btn btn-inline ${themeMode === "dark" ? "btn-primary" : "btn-secondary"}`}
+                        type="button"
+                        onClick={() => setThemeMode("dark")}
+                      >
+                        Dark
+                      </button>
+                    </div>
+                  </article>
+
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>payments</span>
+                      <div>
+                        <strong>Currency</strong>
+                        <p>{settingsPrefsDraft.currency}</p>
+                      </div>
+                    </div>
+                    <select
+                      className="settings-inline-select"
+                      value={settingsPrefsDraft.currency}
+                      onChange={(e) =>
+                        setSettingsPrefsDraft((prev) => ({ ...prev, currency: e.target.value as SettingsPrefs["currency"] }))
+                      }
+                    >
+                      <option value="ZAR">ZAR</option>
+                      <option value="USD">USD</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </article>
+
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>language</span>
+                      <div>
+                        <strong>Language</strong>
+                        <p>{settingsPrefsDraft.language}</p>
+                      </div>
+                    </div>
+                    <select
+                      className="settings-inline-select"
+                      value={settingsPrefsDraft.language}
+                      onChange={(e) =>
+                        setSettingsPrefsDraft((prev) => ({ ...prev, language: e.target.value as SettingsPrefs["language"] }))
+                      }
+                    >
+                      <option value="English (US)">English (US)</option>
+                      <option value="English (UK)">English (UK)</option>
+                    </select>
+                  </article>
+                </div>
+              </section>
+
+              <section className="settings-group">
+                <h5 className="settings-group-label">Shared Ledger</h5>
+                <article className="settings-partner-card">
+                  <div className="settings-row-left">
+                    <div className="settings-partner-icon">
+                      <span className="material-symbols-outlined" aria-hidden>group</span>
+                    </div>
+                    <div>
+                      <p className="eyebrow">Partner Connection</p>
+                      <strong>{profileDraft.partnerName || "Partner"}</strong>
+                    </div>
+                  </div>
+                  <span className="material-symbols-outlined" aria-hidden>verified</span>
+                </article>
+                <div className="settings-list">
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>notifications_active</span>
+                      <div>
+                        <strong>Shared Notifications</strong>
+                        <p>{settingsPrefsDraft.sharedNotifications ? "Enabled" : "Disabled"}</p>
+                      </div>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={settingsPrefsDraft.sharedNotifications}
+                        onChange={(e) =>
+                          setSettingsPrefsDraft((prev) => ({ ...prev, sharedNotifications: e.target.checked }))
+                        }
+                      />
+                      <span />
+                    </label>
+                  </article>
+                </div>
+              </section>
+
+              <section className="settings-group">
+                <h5 className="settings-group-label">Security</h5>
+                <div className="settings-list">
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>face</span>
+                      <div>
+                        <strong>Face ID / Biometrics</strong>
+                        <p>{settingsPrefsDraft.biometricsEnabled ? "Enabled" : "Disabled"}</p>
+                      </div>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={settingsPrefsDraft.biometricsEnabled}
+                        onChange={(e) =>
+                          setSettingsPrefsDraft((prev) => ({ ...prev, biometricsEnabled: e.target.checked }))
+                        }
+                      />
+                      <span />
+                    </label>
+                  </article>
+
+                  <article className="settings-row">
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>lock</span>
+                      <div>
+                        <strong>Profile & Household</strong>
+                        <p>Update names and household label</p>
+                      </div>
+                    </div>
+                    <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
+                  </article>
+                </div>
+
+                <div className="settings-form-grid">
+                  <label>
+                    Your Name
+                    <input
+                      value={profileDraft.displayName}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, displayName: e.target.value }))}
+                      placeholder="Revan Lombard"
+                    />
+                  </label>
+                  <label>
+                    Partner Name
+                    <input
+                      value={profileDraft.partnerName}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, partnerName: e.target.value }))}
+                      placeholder="Bronwen Anderson"
+                    />
+                  </label>
+                  <label>
+                    Household Label
+                    <input
+                      value={profileDraft.householdLabel}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, householdLabel: e.target.value }))}
+                      placeholder="Our Ledger"
+                    />
+                  </label>
+                  <label>
+                    Budget Alert Threshold ({Math.round(alertThresholdDraft)}%)
+                    <input
+                      type="range"
+                      min={40}
+                      max={95}
+                      step={1}
+                      value={alertThresholdDraft}
+                      onChange={(e) => setAlertThresholdDraft(Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section className="settings-group">
+                <h5 className="settings-group-label">Support</h5>
+                <div className="settings-list">
+                  <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("help")}>
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>help</span>
+                      <strong>Help Center</strong>
+                    </div>
+                    <span className="material-symbols-outlined settings-chevron" aria-hidden>open_in_new</span>
+                  </button>
+                  <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("privacy")}>
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>shield</span>
+                      <strong>Privacy Policy</strong>
+                    </div>
+                    <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
+                  </button>
+                  <button className="settings-row settings-row-action" type="button" onClick={() => openSupportLink("terms")}>
+                    <div className="settings-row-left">
+                      <span className="material-symbols-outlined" aria-hidden>description</span>
+                      <strong>Terms of Service</strong>
+                    </div>
+                    <span className="material-symbols-outlined settings-chevron" aria-hidden>chevron_right</span>
+                  </button>
+                </div>
+              </section>
+
+              <section className="settings-group">
+                <h5 className="settings-group-label">App Actions</h5>
+                <div className="settings-actions-grid">
+                  <button className="btn btn-secondary" type="button" onClick={() => void enableNotifications()} disabled={notificationPermission === "denied"}>
+                    {notificationPermission === "denied" ? "Alerts blocked" : "Enable Alerts"}
+                  </button>
+                  <button className="btn btn-ghost" type="button" onClick={() => void sendTestAlert()}>Send Test Alert</button>
+                  <button className="btn btn-secondary" type="button" onClick={resetNavigationQuest}>Reset Onboarding Quest</button>
+                  <button className="btn btn-ghost" type="button" onClick={clearActivityHistory}>Clear Activity Log</button>
+                </div>
+              </section>
+
+              <div className="settings-signout-wrap">
+                <button className="settings-signout-btn" type="button" onClick={signOutFromSettings}>
+                  <span className="material-symbols-outlined" aria-hidden>logout</span>
+                  Sign Out
+                </button>
+                <p className="settings-version-note">NestEggs {APP_VERSION}</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {quickAddOpen ? (
         <div className="modal-backdrop sheet-backdrop" role="dialog" aria-modal="true" aria-label="Quick add">
@@ -2500,8 +2945,6 @@ export default function App() {
                 >
                   <option value="Savings">Savings</option>
                   <option value="Investment">Investment</option>
-                  <option value="Retirement">Retirement</option>
-                  <option value="Emergency">Emergency</option>
                 </select>
               </label>
 
